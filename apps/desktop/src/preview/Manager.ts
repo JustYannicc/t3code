@@ -1985,6 +1985,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         audible: current?.audible ?? false,
         controller: current?.controller ?? "none",
         ...(current?.favicon ? { favicon: current.favicon } : {}),
+        ...(current?.serverTab ? { serverTab: current.serverTab } : {}),
         updatedAt,
       };
       return [
