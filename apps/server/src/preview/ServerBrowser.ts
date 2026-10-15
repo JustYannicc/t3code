@@ -8,7 +8,8 @@ import {
   findBrowserProfile,
   INCOGNITO_BROWSER_PROFILE_ID,
   resolveBrowserProfiles,
-  type BrowserProfile,
+  BrowserProfile,
+  BrowserProfileId,
   type PreviewReportProfilesInput,
   PREVIEW_AUTOMATION_SERVER_OPERATIONS,
   PreviewViewportSetting as PreviewViewportSettingSchema,
@@ -43,6 +44,7 @@ import {
   type PreviewAppearancePreference,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
 import * as NodeCrypto from "node:crypto";
@@ -50,14 +52,17 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import { constVoid } from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type {
@@ -98,6 +103,15 @@ const DESKTOP_ATTACH_TIMEOUT = "10 seconds";
 const VIEWER_OUTPUT_LIMIT = 64;
 const RECORDING_SCREENCAST = { format: "jpeg", quality: 90, everyNthFrame: 1 } as const;
 const decodeViewportSetting = Schema.decodeUnknownSync(PreviewViewportSettingSchema);
+/** The profile catalog agents choose from, as saved across restarts. */
+const SavedProfiles = Schema.fromJsonString(
+  Schema.Struct({
+    profiles: Schema.Array(BrowserProfile),
+    defaultProfileId: BrowserProfileId,
+  }),
+);
+const decodeSavedProfiles = Schema.decodeEffect(SavedProfiles);
+const encodeSavedProfiles = Schema.encodeEffect(SavedProfiles);
 /** The agent cursor glides to its target, then pulses just before the press, like desktop tabs. */
 const AGENT_CURSOR_MOVE_MS = 160;
 const AGENT_CURSOR_CLICK_LEAD_MS = 40;
@@ -247,8 +261,9 @@ export class ServerBrowser extends Context.Service<
     /** Deletes a human profile's server-side storage, closing its open tabs first. */
     readonly clearProfile: (profileId: string) => Effect.Effect<void, PreviewClearProfileError>;
     /**
-     * Records a client's browser profiles for agents' preview_open. In memory:
-     * clients report again on connect and whenever the list changes.
+     * Records a client's browser profiles for agents' preview_open. The result
+     * is saved, so it survives a restart; clients report again on connect and
+     * whenever the list changes.
      */
     readonly reportProfiles: (input: PreviewReportProfilesInput) => Effect.Effect<void>;
   }
@@ -1351,15 +1366,68 @@ const make = Effect.gen(function* () {
     readonly defaultProfileId: string;
   } | null = null;
 
+  /** Adds the built-ins and falls back to the default profile for an unknown default. */
+  const resolveProfileCatalog = (input: {
+    readonly profiles: ReadonlyArray<BrowserProfile>;
+    readonly defaultProfileId: string;
+  }) => {
+    const profiles = resolveBrowserProfiles(input.profiles);
+    return {
+      profiles,
+      defaultProfileId:
+        findBrowserProfile(profiles, input.defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID,
+    };
+  };
+
+  // Saved beside the profiles' storage, so an agent tab opened after a restart,
+  // before any client reports again, still gets the profile holding its logins.
+  const savedProfilesPath = NodePath.join(
+    config.stateDir,
+    "server-browser",
+    "reported-profiles.json",
+  );
+  const fileSystem = yield* FileSystem.FileSystem;
+  const fileServices = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+  /** The file's contents as last read or written, so an unchanged catalog skips the write. */
+  let savedProfilesJson: string | null = null;
+  const saveLock = yield* Semaphore.make(1);
+
+  yield* Effect.gen(function* () {
+    const json = yield* fileSystem.readFileString(savedProfilesPath);
+    reportedProfiles = resolveProfileCatalog(yield* decodeSavedProfiles(json));
+    savedProfilesJson = json;
+  }).pipe(
+    Effect.catchReason("PlatformError", "NotFound", () => Effect.void),
+    Effect.catch((cause) =>
+      Effect.logWarning("Ignoring unreadable saved browser profiles", { cause }),
+    ),
+  );
+
+  /**
+   * Saves the catalog as it is when the lock is taken, whatever produced it,
+   * so concurrent reports end with the file matching memory.
+   */
+  const saveProfiles = saveLock
+    .withPermits(1)(
+      Effect.gen(function* () {
+        if (reportedProfiles === null) return;
+        const json = yield* encodeSavedProfiles(reportedProfiles);
+        if (json === savedProfilesJson) return;
+        yield* writeFileStringAtomically({ filePath: savedProfilesPath, contents: json });
+        savedProfilesJson = json;
+      }),
+    )
+    .pipe(
+      Effect.provide(fileServices),
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not save the reported browser profiles", { cause }),
+      ),
+    );
+
   const reportProfiles: ServerBrowser["Service"]["reportProfiles"] = (input) =>
     Effect.sync(() => {
-      const profiles = resolveBrowserProfiles(input.profiles);
-      reportedProfiles = {
-        profiles,
-        defaultProfileId:
-          findBrowserProfile(profiles, input.defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID,
-      };
-    });
+      reportedProfiles = resolveProfileCatalog(input);
+    }).pipe(Effect.andThen(saveProfiles));
 
   const profileStatus = () => {
     const profiles = reportedProfiles?.profiles ?? BUILT_IN_BROWSER_PROFILES;

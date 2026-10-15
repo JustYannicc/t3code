@@ -16,6 +16,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -269,6 +270,18 @@ const dependencies = Layer.mergeAll(
   Layer.provideMerge(NodeServices.layer),
 );
 const layer = ServerBrowser.layer.pipe(Layer.provideMerge(dependencies));
+/** The service as one server process whose state lives in `home`, so a test can restart it. */
+const layerAt = (home: string) =>
+  ServerBrowser.layer.pipe(
+    Layer.provide(ServerConfig.layerTest(process.cwd(), home)),
+    Layer.provideMerge(dependencies),
+  );
+const savedProfilesPath = (home: string) =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const { stateDir } = yield* ServerConfig.deriveServerPaths(home, undefined);
+    return path.join(stateDir, "server-browser", "reported-profiles.json");
+  });
 const ready = Effect.gen(function* () {
   const browser = yield* ServerBrowser.ServerBrowser;
   const broker = yield* Broker.PreviewAutomationBroker;
@@ -1626,6 +1639,94 @@ it.live("an agent tab keeps throwaway storage when no client reported profiles",
       expect(contextRequests).toEqual([{ profileId: "default", isolated: true }]);
     }),
   ).pipe(Effect.provide(layer)),
+);
+
+it.live("an agent tab opens in a reported profile after a restart, before any client reports", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-server-browser-restart-" });
+    yield* Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      yield* browser.reportProfiles({
+        profiles: [
+          { id: "profile-work", name: "Work", kind: "persistent" },
+          { id: "profile-personal", name: "Personal", kind: "persistent" },
+        ],
+        defaultProfileId: "profile-work",
+      });
+    }).pipe(Effect.scoped, Effect.provide(layerAt(home)));
+
+    const opened = yield* Effect.gen(function* () {
+      const broker = yield* Broker.PreviewAutomationBroker;
+      yield* Effect.yieldNow;
+      return yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        operation: "open",
+        input: { reuseExistingTab: false, show: false, profileId: "profile-personal" },
+      });
+    }).pipe(Effect.scoped, Effect.provide(layerAt(home)));
+
+    // The profile's own storage, not a throwaway context.
+    expect(contextRequests).toEqual([{ profileId: "profile-personal", isolated: false }]);
+    expect(opened).toMatchObject({
+      defaultProfileId: "profile-work",
+      profiles: [
+        { id: "default", name: "Default" },
+        { id: "incognito", name: "Incognito", incognito: true },
+        { id: "profile-work", name: "Work" },
+        { id: "profile-personal", name: "Personal" },
+      ],
+    });
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.live("a repeated profile report leaves the saved file alone", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-server-browser-repeat-" });
+    const path = yield* savedProfilesPath(home);
+    yield* Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const report = (defaultProfileId: string) =>
+        browser.reportProfiles({
+          profiles: [{ id: "profile-work", name: "Work", kind: "persistent" }],
+          defaultProfileId,
+        });
+      // Saves replace the file by rename, so a rewrite shows as a new inode.
+      const inode = fs.stat(path).pipe(Effect.map((info) => Option.getOrThrow(info.ino)));
+
+      yield* report("profile-work");
+      const first = yield* inode;
+      yield* report("profile-work");
+      expect(yield* inode).toBe(first);
+      yield* report("default");
+      expect(yield* inode).not.toBe(first);
+    }).pipe(Effect.scoped, Effect.provide(layerAt(home)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.live("an unreadable saved profile list starts the server with the built-in profiles", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-server-browser-corrupt-" });
+    const path = yield* savedProfilesPath(home);
+    yield* fs.makeDirectory((yield* Path.Path).dirname(path), { recursive: true });
+    yield* fs.writeFileString(path, '{"profiles":[{"id":');
+
+    const opened = yield* Effect.gen(function* () {
+      const broker = yield* Broker.PreviewAutomationBroker;
+      yield* Effect.yieldNow;
+      return yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+    }).pipe(Effect.scoped, Effect.provide(layerAt(home)));
+
+    expect(contextRequests).toEqual([{ profileId: "default", isolated: true }]);
+    expect(opened.defaultProfileId).toBeUndefined();
+    expect(opened.profiles?.map((profile) => profile.id)).toEqual(["default", "incognito"]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
 it.live("a desktop page that comes back reconnects without waiting for a viewer", () =>
