@@ -12,6 +12,8 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { composerFloatingLayerProps } from "./composerEventScope";
+import type { ComposerSendLock } from "./composerSendLock";
+import { ComposerSendLockLatch } from "./ComposerSendLockLatch";
 import {
   alternateComposerDispatchAction,
   resolveComposerDispatchMode,
@@ -53,6 +55,8 @@ interface ComposerPrimaryActionsProps {
   compactBeforeSendTokens?: number | null;
   keepFullHistory?: boolean;
   onToggleKeepFullHistory?: () => void;
+  /** Draws the padlock shackle on the send button. */
+  sendLock?: ComposerSendLock;
 }
 
 const formatPendingPrimaryActionLabel = (input: {
@@ -108,6 +112,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compactBeforeSendTokens = null,
   keepFullHistory = false,
   onToggleKeepFullHistory,
+  sendLock,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
@@ -346,16 +351,26 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             strokeLinecap="round"
             strokeLinejoin="round"
           />
+          {sendLock?.locked ? (
+            <path
+              d="M2.5 11.5L11.5 2.5"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+          ) : null}
         </svg>
       )}
     </button>
   );
 
   const submit = (
-    <Tooltip key="submit">
-      <TooltipTrigger render={<span className="inline-flex" />}>{sendButton}</TooltipTrigger>
-      <TooltipPopup>{submitTooltip}</TooltipPopup>
-    </Tooltip>
+    <ComposerSendLockLatch key="submit" lock={sendLock}>
+      <Tooltip>
+        <TooltipTrigger render={<span className="inline-flex" />}>{sendButton}</TooltipTrigger>
+        <TooltipPopup>{submitTooltip}</TooltipPopup>
+      </Tooltip>
+    </ComposerSendLockLatch>
   );
   if (compactTokens === null) return submit;
 

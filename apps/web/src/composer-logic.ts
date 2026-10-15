@@ -45,8 +45,11 @@ export function composerSubmissionIntentForKey(input: {
   isRunning?: boolean;
   sendShortcut?: ClientSettings["sendShortcut"];
   prompt?: string;
+  /** A send-locked composer never submits from a key, so Enter adds a line. */
+  sendLocked?: boolean;
 }): ComposerSubmissionIntent | null {
   const { event } = input;
+  if (input.sendLocked) return null;
   if (input.isMobileViewport || event.isComposing || event.keyCode === 229 || event.repeat)
     return null;
   const command = resolveShortcutCommand(event, input.keybindings, {

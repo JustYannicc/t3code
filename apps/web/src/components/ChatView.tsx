@@ -414,6 +414,10 @@ import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
 import {
+  holdLockedComposerSend,
+  toggleComposerSendLockFromShortcut,
+} from "./chat/composerSendLock";
+import {
   PanelLayoutControls,
   type PanelLayoutControlsProps,
   RightPanelMaximizeControl,
@@ -5580,6 +5584,9 @@ export default function ChatView(props: ChatViewProps) {
         const next = logicalProjectEnvironments[(index + 1) % logicalProjectEnvironments.length];
         if (next) onEnvironmentChangeStable(next.environmentId);
       },
+      "composer.toggleSendLock": ({ event }) => {
+        toggleComposerSendLockFromShortcut(event, composerDraftTarget);
+      },
       "composer.branch": ({ event }) => {
         if (!event.repeat) branchToolbarRef.current?.openBranchPicker();
       },
@@ -5998,6 +6005,14 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
       onAdvanceActivePendingUserInput();
+      return;
+    }
+    if (
+      holdLockedComposerSend(composerDraftTarget, {
+        annotation: directAnnotation !== undefined,
+        answeringPlan: showPlanFollowUpPrompt,
+      })
+    ) {
       return;
     }
     if (!sendCtx?.providerAvailable) {
