@@ -21,6 +21,7 @@ if (
     const { runAcpMcpCliFastPath } = await import("./mcp/AcpMcpStdioBridge.ts");
     await runAcpMcpCliFastPath(command, process.argv.slice(3));
   } else {
+    (await import("./systemCertificates.ts")).trustSystemCertificates();
     const { runCli } = await import("./binCli.ts");
     runCli();
   }
