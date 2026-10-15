@@ -167,6 +167,18 @@ Stashes containing uploaded files must be restored in their original environment
 Those files are retained for 24 hours. After an upload expires, restore the prompt
 and use **Attach again** or remove the missing file before sending.
 
+## Lock sending
+
+On web and desktop, click the shackle above the send button to lock sending for
+the current draft. While it is locked, Enter adds a new line and nothing sends,
+including send shortcuts and preview annotations, so you can write a long prompt
+without sending it early. Click the shackle again to unlock. Each draft keeps its
+own lock, including after a reload. Answering an agent's question or a proposed
+plan is never locked.
+
+To lock and unlock from the keyboard, bind **Composer: Toggle Send Lock** in
+**Settings → Keybindings**. It has no default shortcut.
+
 ## Voice input on iPhone
 
 On supported iPhones with iOS 26 or later, use the composer's microphone to record,
