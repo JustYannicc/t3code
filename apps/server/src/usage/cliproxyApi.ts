@@ -8,7 +8,9 @@ import {
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Hex from "effect/encoding/Hex";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
@@ -230,12 +232,18 @@ export const makeCliproxyApi = Effect.gen(function* () {
       .toSorted((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at));
   });
 
+  // UsageLimitSources runs every read and redeem under one lock, so reads of one
+  // account never overlap.
   const usageReads = yield* makeThrottledReader<
     UsageLimitSourceAccount,
     Effect.Error<ReturnType<typeof apiCall>> | Schema.SchemaError
   >(HUB_USAGE_READ_PACING);
-  const usageReadKey = (config: UsageLimitSourceConfig, accountId: string) =>
-    `${config.url}\n${accountId}`;
+  // A credential replaced under the same file id is a different account, so it
+  // gets its own reading rather than the old account's identity and bars.
+  const usageReadKey = (config: UsageLimitSourceConfig, account: typeof AuthFile.Type) =>
+    [config.url, account.id, account.email ?? "", account.id_token?.chatgpt_account_id ?? ""].join(
+      "\n",
+    );
 
   const readAccount = Effect.fn("CliproxyApi.readAccount")(function* (
     config: UsageLimitSourceConfig,
@@ -323,7 +331,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
         },
       };
     });
-    return yield* usageReads.read(usageReadKey(config, account.id), read).pipe(
+    return yield* usageReads.read(usageReadKey(config, account), read).pipe(
       Effect.catch((error) =>
         Effect.succeed({
           ...base,
@@ -362,6 +370,38 @@ export const makeCliproxyApi = Effect.gen(function* () {
     accountId: string,
     creditId: string,
   ): Effect.fn.Return<ProviderConsumeResetCreditResult, UsageLimitSourceError> {
+    const redeem = (account: typeof AuthFile.Type) =>
+      Effect.gen(function* () {
+        const body = yield* apiCall(config, account, `${CREDIT_URL}/consume`, {
+          redeem_request_id: yield* creditRedeemRequestId(
+            account.id_token?.chatgpt_account_id ?? account.id,
+            creditId,
+          ).pipe(Effect.provideService(Crypto.Crypto, crypto)),
+          credit_id: creditId,
+        });
+        const response = yield* decodeConsumeResponse(body);
+        const outcome = (
+          {
+            reset: "reset",
+            nothing_to_reset: "nothingToReset",
+            no_credit: "noCredit",
+            already_redeemed: "alreadyRedeemed",
+          } as const
+        )[response.code];
+        if (outcome !== "reset" && outcome !== "alreadyRedeemed") return { outcome };
+        const cleared = yield* management(config, "reset-quota", {
+          auth_index: account.auth_index,
+        }).pipe(Effect.result);
+        return {
+          outcome,
+          ...(cleared._tag === "Failure"
+            ? {
+                warning:
+                  "Credit redeemed, but the hub cooldown could not be cleared. Routing may resume after its cooldown expires.",
+              }
+            : {}),
+        } as const;
+      });
     const operation = Effect.gen(function* () {
       const account = (yield* authFiles(config)).find((account) => account.id === accountId);
       if (!account || account.disabled || account.provider !== "codex") {
@@ -369,45 +409,19 @@ export const makeCliproxyApi = Effect.gen(function* () {
           detail: "The Codex hub account is missing or disabled.",
         });
       }
-      const body = yield* apiCall(config, account, `${CREDIT_URL}/consume`, {
-        redeem_request_id: yield* creditRedeemRequestId(
-          account.id_token?.chatgpt_account_id ?? account.id,
-          creditId,
-        ).pipe(Effect.provideService(Crypto.Crypto, crypto)),
-        credit_id: creditId,
-      });
-      const response = yield* decodeConsumeResponse(body);
-      const outcome = (
-        {
-          reset: "reset",
-          nothing_to_reset: "nothingToReset",
-          no_credit: "noCredit",
-          already_redeemed: "alreadyRedeemed",
-        } as const
-      )[response.code];
-      if (outcome !== "reset" && outcome !== "alreadyRedeemed") return { outcome };
-      const cleared = yield* management(config, "reset-quota", {
-        auth_index: account.auth_index,
-      }).pipe(Effect.result);
-      return {
-        outcome,
-        ...(cleared._tag === "Failure"
-          ? {
-              warning:
-                "Credit redeemed, but the hub cooldown could not be cleared. Routing may resume after its cooldown expires.",
-            }
-          : {}),
-      } as const;
+      return yield* redeem(account).pipe(
+        // The credit may be spent even when the answer is lost or the redeem is
+        // interrupted, so read fresh unless the provider refused the redeem
+        // outright; then the last read and its backoff stand.
+        Effect.onExit((exit) => {
+          const failure = Exit.findError(exit);
+          return Result.isSuccess(failure) && isHubProviderRateLimitedError(failure.success)
+            ? Effect.void
+            : usageReads.forget(usageReadKey(config, account));
+        }),
+      );
     });
     return yield* operation.pipe(
-      // The credit may be spent even when the answer is lost, so read fresh unless the
-      // provider refused the redeem outright; then the last read and its backoff stand.
-      Effect.tap(() => usageReads.forget(usageReadKey(config, accountId))),
-      Effect.tapError((error) =>
-        isHubProviderRateLimitedError(error)
-          ? Effect.void
-          : usageReads.forget(usageReadKey(config, accountId)),
-      ),
       Effect.mapError((error) =>
         isUsageLimitSourceError(error)
           ? error

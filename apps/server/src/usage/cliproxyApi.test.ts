@@ -1,9 +1,11 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import { makeCliproxyApi } from "./cliproxyApi.ts";
 
@@ -51,10 +53,12 @@ function fixture(
     accounts?: Array<(typeof accounts)[number] & { disabled?: boolean }>;
     upstream?: (request: RequestBody) => { status: number; body: unknown };
     cooldownStatus?: number;
+    /** Runs before the hub answers a cooldown reset, to hold a redeem mid-flight. */
+    beforeCooldownReset?: Effect.Effect<void>;
   } = {},
 ) {
   const requests: Array<{ path: string; body?: RequestBody }> = [];
-  const http = HttpClient.make((request) =>
+  const respond = (request: HttpClientRequest.HttpClientRequest) =>
     Effect.sync(() => {
       expect(request.headers.authorization).toBe("Bearer management-secret");
       const path = new URL(request.url).pathname;
@@ -103,7 +107,14 @@ function fixture(
         request,
         Response.json({ status_code: upstream.status, body: encodeJson(upstream.body) }),
       );
-    }),
+    });
+  const http = HttpClient.make((request) =>
+    Effect.andThen(
+      request.url.endsWith("/reset-quota")
+        ? (options.beforeCooldownReset ?? Effect.void)
+        : Effect.void,
+      respond(request),
+    ),
   );
   return {
     requests,
@@ -272,6 +283,48 @@ describe("CLIProxyAPI built-in management API", () => {
       yield* api.readAccounts(config);
       // Only the redeemed account is read again inside the minute.
       expect(usageProbes()).toBe(3);
+    }),
+  );
+
+  it.effect("reads an account fresh after a redeem interrupted once the credit is spent", () =>
+    Effect.gen(function* () {
+      const spent = yield* Deferred.make<void>();
+      const test = fixture({
+        beforeCooldownReset: Deferred.succeed(spent, undefined).pipe(Effect.andThen(Effect.never)),
+      });
+      const api = yield* test.api;
+      const usageProbes = () =>
+        test.requests.filter((request) => request.body?.url?.endsWith("/wham/usage")).length;
+      yield* api.readAccounts(config);
+      const redeem = yield* Effect.forkChild(api.consume(config, "second.json", "credit-b"));
+      yield* Deferred.await(spent);
+      yield* Fiber.interrupt(redeem);
+      yield* api.readAccounts(config);
+      expect(usageProbes()).toBe(3);
+    }),
+  );
+
+  it.effect("reads a credential replaced under the same file id as a new account", () =>
+    Effect.gen(function* () {
+      const listed = [{ ...accounts[0]!, provider: "claude" }];
+      const test = fixture({
+        accounts: listed,
+        upstream: () => ({
+          status: 200,
+          body: {
+            five_hour: {
+              utilization: listed[0]!.email === "new@example.com" ? 70 : 10,
+              resets_at: null,
+            },
+          },
+        }),
+      });
+      const api = yield* test.api;
+      yield* api.readAccounts(config);
+      listed[0] = { ...listed[0]!, email: "new@example.com" };
+      const [account] = yield* api.readAccounts(config);
+      expect(account?.email).toBe("new@example.com");
+      expect(account?.usageLimits.windows[0]?.usedPercent).toBe(70);
     }),
   );
 
