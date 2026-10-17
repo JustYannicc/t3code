@@ -5,6 +5,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
@@ -18,6 +19,7 @@ import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/rela
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import { resolveEarlyMacKeychainName } from "./DesktopEarlyElectronStartup.ts";
 import * as DesktopUserData from "./DesktopUserData.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopWebLinks from "./DesktopWebLinks.ts";
@@ -99,14 +101,28 @@ export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const electronApp = yield* ElectronApp.ElectronApp;
   const shell = yield* ElectronShell.ElectronShell;
+  const path = yield* Path.Path;
+  const localMacKeychainName = resolveEarlyMacKeychainName({
+    platform: environment.platform,
+    isPackaged: environment.isPackaged,
+    runtimeDirectory: environment.dirname,
+    isDevelopment: environment.isDevelopment,
+  });
+  const tokenDirectory =
+    localMacKeychainName === null
+      ? environment.stateDir
+      : path.join(environment.stateDir, "local-keychains", localMacKeychainName);
 
   // Must not yield: the bridge registers a scheme Electron rejects once ready.
   const userDataPath = yield* DesktopUserData.resolveUserDataPath(environment);
   yield* electronApp.setPath("userData", userDataPath);
+  if (localMacKeychainName !== null) {
+    yield* electronApp.setPath("sessionData", userDataPath);
+  }
 
   const bridge = yield* Effect.acquireRelease(
     Effect.try({
-      try: () => createDesktopClerkBridge(environment.stateDir, environment.isDevelopment),
+      try: () => createDesktopClerkBridge(tokenDirectory, environment.isDevelopment),
       catch: (cause) =>
         new DesktopClerkBridgeInitializationError({
           stateDir: environment.stateDir,

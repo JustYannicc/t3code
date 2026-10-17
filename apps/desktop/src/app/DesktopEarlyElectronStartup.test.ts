@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 
 import {
+  resolveEarlyMacKeychainName,
   resolveEarlyLinuxElectronOptions,
   resolveEarlyLinuxPasswordStorePreference,
   resolveLinuxDisableFeaturesSwitch,
@@ -10,6 +11,52 @@ import {
 
 describe("DesktopEarlyElectronStartup", () => {
   const joinPath = NodePath.posix.join;
+
+  it("isolates local macOS Keychain names by normalized runtime path and launch mode", () => {
+    const input = {
+      platform: "darwin",
+      isPackaged: false,
+      runtimeDirectory: "/repo/worktree/apps/desktop/dist-electron",
+      isDevelopment: true,
+    } as const;
+    const name = resolveEarlyMacKeychainName(input);
+    assert.match(name!, /^T3 Code Dev [a-f0-9]{12}$/);
+    assert.equal(
+      resolveEarlyMacKeychainName({
+        ...input,
+        runtimeDirectory: "/repo/worktree/apps/desktop/./dist-electron/",
+      }),
+      name,
+    );
+    assert.notEqual(
+      resolveEarlyMacKeychainName({ ...input, runtimeDirectory: "/other/dist-electron" }),
+      name,
+    );
+    assert.notEqual(resolveEarlyMacKeychainName({ ...input, isDevelopment: false }), name);
+  });
+
+  it("preserves packaged and non-macOS Keychain identities", () => {
+    for (const platform of ["darwin", "linux", "win32"] as const) {
+      assert.isNull(
+        resolveEarlyMacKeychainName({
+          platform,
+          isPackaged: true,
+          runtimeDirectory: "/app",
+          isDevelopment: false,
+        }),
+      );
+      if (platform !== "darwin") {
+        assert.isNull(
+          resolveEarlyMacKeychainName({
+            platform,
+            isPackaged: false,
+            runtimeDirectory: "/repo",
+            isDevelopment: true,
+          }),
+        );
+      }
+    }
+  });
 
   it("reads the persisted linux password-store preference before Electron is ready", () => {
     const preference = resolveEarlyLinuxPasswordStorePreference({

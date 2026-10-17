@@ -28,9 +28,16 @@ const encodeLegacySavedEnvironments = Schema.encodeEffect(
     Schema.Struct({ version: Schema.Literal(1), records: Schema.Array(Schema.Unknown) }),
   ),
 );
-function layerSafeStorageFor(available: boolean, failDecrypt: Ref.Ref<boolean> | null = null) {
+type EncryptionAvailability =
+  | boolean
+  | Effect.Effect<boolean, ElectronSafeStorage.ElectronSafeStorageAvailabilityError>;
+
+function layerSafeStorageFor(
+  available: EncryptionAvailability,
+  failDecrypt: Ref.Ref<boolean> | null = null,
+) {
   return Layer.succeed(ElectronSafeStorage.ElectronSafeStorage, {
-    isEncryptionAvailable: Effect.succeed(available),
+    isEncryptionAvailable: typeof available === "boolean" ? Effect.succeed(available) : available,
     encryptString: (value) => Effect.succeed(textEncoder.encode(`encrypted:${value}`)),
     decryptString: (value) => {
       return Effect.gen(function* () {
@@ -52,9 +59,14 @@ function layerSafeStorageFor(available: boolean, failDecrypt: Ref.Ref<boolean> |
 
 function layerFor(
   baseDir: string,
-  encryptionAvailable = true,
+  encryptionAvailable: EncryptionAvailability = true,
   failDecrypt: Ref.Ref<boolean> | null = null,
   fileSystemLayer: Layer.Layer<FileSystem.FileSystem> = NodeServices.layer,
+  runtime: {
+    readonly dirname?: string;
+    readonly platform?: NodeJS.Platform;
+    readonly isPackaged?: boolean;
+  } = {},
 ) {
   const layerEnvironment = DesktopEnvironment.layer({
     dirname: "/repo/apps/desktop/src",
@@ -66,6 +78,7 @@ function layerFor(
     isPackaged: true,
     resourcesPath: "/missing/resources",
     runningUnderArm64Translation: false,
+    ...runtime,
   }).pipe(
     Layer.provide(
       Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({ T3CODE_HOME: baseDir })),
@@ -90,7 +103,7 @@ function layerFor(
 
 const withStore = <A, E, R>(
   effect: Effect.Effect<A, E, R | DesktopConnectionCatalogStore.DesktopConnectionCatalogStore>,
-  encryptionAvailable = true,
+  encryptionAvailable: EncryptionAvailability = true,
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -101,6 +114,59 @@ const withStore = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
 
 describe("DesktopConnectionCatalogStore", () => {
+  it.effect("isolates local macOS catalogs sharing a home and leaves legacy data untouched", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-local-keychain-catalog-test-",
+      });
+      const makeStore = (dirname: string) =>
+        DesktopConnectionCatalogStore.DesktopConnectionCatalogStore.pipe(
+          Effect.provide(
+            layerFor(baseDir, true, null, NodeServices.layer, { dirname, isPackaged: false }),
+          ),
+        );
+      const sharedPath = path.join(baseDir, "userdata", "connection-catalog.json");
+      const legacyPath = path.join(baseDir, "userdata", "saved-environments.json");
+      yield* fileSystem.makeDirectory(path.dirname(sharedPath), { recursive: true });
+      yield* fileSystem.writeFileString(sharedPath, "unreadable shared ciphertext");
+      yield* fileSystem.writeFileString(legacyPath, "unreadable shared registry");
+      const a = yield* makeStore("/repo/a/apps/desktop/dist-electron");
+      const b = yield* makeStore("/repo/b/apps/desktop/dist-electron");
+      assert.deepStrictEqual(yield* a.get, Option.none());
+      assert.isTrue(yield* a.set("catalog A"));
+      assert.deepStrictEqual(yield* b.get, Option.none());
+      assert.isTrue(yield* b.set("catalog B"));
+      assert.deepStrictEqual(yield* a.get, Option.some("catalog A"));
+      assert.deepStrictEqual(yield* b.get, Option.some("catalog B"));
+      yield* b.clear;
+      assert.deepStrictEqual(yield* a.get, Option.some("catalog A"));
+      assert.deepStrictEqual(yield* b.get, Option.none());
+      assert.equal(yield* fileSystem.readFileString(sharedPath), "unreadable shared ciphertext");
+      assert.equal(yield* fileSystem.readFileString(legacyPath), "unreadable shared registry");
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect("reads a fresh profile without accessing Keychain", () => {
+    const cause = new ElectronSafeStorage.ElectronSafeStorageAvailabilityError({
+      cause: new Error("Keychain requires consent"),
+    });
+    return withStore(
+      Effect.gen(function* () {
+        const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
+        assert.deepStrictEqual(yield* store.get, Option.none());
+        const error = yield* Effect.flip(store.set("{}"));
+        assert.instanceOf(
+          error,
+          DesktopConnectionCatalogStore.DesktopConnectionCatalogStoreProtectionError,
+        );
+        assert.strictEqual(error.cause, cause);
+      }),
+      Effect.fail(cause),
+    );
+  });
+
   it.effect("persists, reads, and clears an encrypted connection catalog", () =>
     withStore(
       Effect.gen(function* () {

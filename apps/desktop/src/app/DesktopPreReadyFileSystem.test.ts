@@ -14,6 +14,8 @@ const resolveWindowsUserData = (appDataDirectory: string) =>
     appDataDirectory,
     isDevelopment: false,
     platform: "win32",
+    isPackaged: true,
+    dirname: "/app",
   }).pipe(Effect.provide(DesktopPreReadyFileSystem.layer));
 
 it.layer(NodeServices.layer)("DesktopPreReadyFileSystem", (it) => {

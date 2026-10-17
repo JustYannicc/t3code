@@ -25,6 +25,7 @@ import * as Schema from "effect/Schema";
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import { resolveEarlyMacKeychainName } from "./DesktopEarlyElectronStartup.ts";
 
 const EncryptedConnectionCatalogDocument = Schema.Struct({
   version: Schema.Literal(1),
@@ -384,7 +385,21 @@ export const make = Effect.gen(function* () {
   const safeStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
   const crypto = yield* Crypto.Crypto;
   const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
-  const catalogPath = path.join(environment.stateDir, "connection-catalog.json");
+  const localMacKeychainName = resolveEarlyMacKeychainName({
+    platform: environment.platform,
+    isPackaged: environment.isPackaged,
+    runtimeDirectory: environment.dirname,
+    isDevelopment: environment.isDevelopment,
+  });
+  const catalogPath =
+    localMacKeychainName === null
+      ? path.join(environment.stateDir, "connection-catalog.json")
+      : path.join(
+          environment.stateDir,
+          "local-keychains",
+          localMacKeychainName,
+          "connection-catalog.json",
+        );
   const encryptionAvailable = safeStorage.isEncryptionAvailable.pipe(
     Effect.mapError(
       (cause) =>
@@ -431,9 +446,8 @@ export const make = Effect.gen(function* () {
   });
 
   const migrateLegacyCatalog = Effect.gen(function* () {
-    if (!(yield* encryptionAvailable)) {
-      return Option.none<string>();
-    }
+    // Shared legacy credentials belong to the old key, not this runtime's isolated key.
+    if (localMacKeychainName !== null) return Option.none<string>();
     const records = yield* savedEnvironments.getRegistry.pipe(
       Effect.mapError(
         (cause) =>
@@ -445,6 +459,9 @@ export const make = Effect.gen(function* () {
       ),
     );
     if (records.length === 0) {
+      return Option.none<string>();
+    }
+    if (!(yield* encryptionAvailable)) {
       return Option.none<string>();
     }
     const catalog = yield* migrateSavedEnvironmentRecords(records, savedEnvironments, catalogPath);

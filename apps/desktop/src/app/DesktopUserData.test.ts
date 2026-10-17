@@ -7,6 +7,38 @@ import * as PlatformError from "effect/PlatformError";
 
 import { resolveUserDataPath } from "./DesktopUserData.ts";
 
+it.effect.each([true, false])(
+  "isolates local macOS browser profiles without copying shared data (development: %s)",
+  (isDevelopment) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-mac-profile-" });
+      const legacy = path.join(directory, isDevelopment ? "T3 Code (Dev)" : "t3code-v2");
+      yield* fs.makeDirectory(legacy, { recursive: true });
+      yield* fs.writeFileString(path.join(legacy, "Cookies"), "shared encrypted cookies");
+      const input = {
+        appDataDirectory: directory,
+        platform: "darwin",
+        isPackaged: false,
+        isDevelopment,
+      } as const;
+      const a = yield* resolveUserDataPath({ ...input, dirname: "/runtime/a" });
+      const b = yield* resolveUserDataPath({ ...input, dirname: "/runtime/b" });
+      assert.notEqual(a, b);
+      assert.notEqual(a, legacy);
+      yield* fs.makeDirectory(a, { recursive: true });
+      yield* fs.writeFileString(path.join(a, "Cookies"), "runtime A cookies");
+      assert.isFalse(yield* fs.exists(path.join(b, "Cookies")));
+      assert.equal(yield* resolveUserDataPath({ ...input, dirname: "/runtime/a/./" }), a);
+      assert.equal(yield* fs.readFileString(path.join(a, "Cookies")), "runtime A cookies");
+      assert.equal(
+        yield* fs.readFileString(path.join(legacy, "Cookies")),
+        "shared encrypted cookies",
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("identifies a failed source read and preserves its cause", () => {
   const sourceState = "/profiles/t3code/Local State";
   const cause = PlatformError.systemError({
@@ -20,6 +52,8 @@ it.effect("identifies a failed source read and preserves its cause", () => {
       appDataDirectory: "/profiles",
       isDevelopment: false,
       platform: "win32",
+      isPackaged: true,
+      dirname: "/app",
     }).pipe(Effect.flip);
     assert.equal(error.operation, "read");
     assert.equal(error.resourcePath, sourceState);
@@ -55,6 +89,8 @@ it.effect.each(["t3code", "T3 Code (Alpha)"])(
         appDataDirectory: directory,
         isDevelopment: false,
         platform: "win32",
+        isPackaged: true,
+        dirname: "/app",
       });
       assert.equal(yield* fs.readFileString(path.join(destination, "Local State")), state);
       assert.equal(yield* fs.readFileString(path.join(source, "Local State")), state);
@@ -64,6 +100,8 @@ it.effect.each(["t3code", "T3 Code (Alpha)"])(
         appDataDirectory: directory,
         isDevelopment: false,
         platform: "win32",
+        isPackaged: true,
+        dirname: "/app",
       });
       assert.equal(
         yield* fs.readFileString(path.join(destination, "Local State")),
