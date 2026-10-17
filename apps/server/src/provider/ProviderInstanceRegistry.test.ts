@@ -547,6 +547,7 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
       const recoveredProbeCount = probeCount;
       expect(recoveredProbeCount).toBeGreaterThan(failedProbeCount);
 
+      yield* TestClock.adjust("1 second");
       yield* claude!.invalidateCaches ?? Effect.void;
       failProbe = true;
       const sameAccountFailure = yield* claude!.snapshot.refresh;
