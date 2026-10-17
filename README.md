@@ -139,3 +139,49 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR
 Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
 
 Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+
+## Yannic's patched desktop build
+
+`yannic/patched` is a personal macOS build for Signalbox issue #779. It keeps
+upstream's `~/.t3` data directory. Never run it alongside the stock app against
+the same data. Keep the stock app and back up the data before switching.
+
+Merge order for the 2026-10-17 build:
+
+1. Start at upstream `pingdotgg/t3code` main, `130f4a2457172eb62bfd53ae9f5fa16cae8be5d5`.
+2. Merge `JustYannicc/t3code:fix/history-compaction-worker`, `77efd635d4`, with
+   `--no-ff`. This is the upstream equivalent of Signalbox #783: discovery reads
+   use the reader worker and compaction yields between bounded work slices.
+3. Merge upstream PR #20809, `b8a4ef698ea793504692be43358b22b7db51f6c8`, with
+   `--no-ff`. It includes `32b15c5c150c`, `677991191ad6`, and `b8a4ef698ea7`.
+4. Cherry-pick the reviewed follow-up from Signalbox #781, `e101c52f4535`,
+   retaining its source attribution. It keeps the old Stop target disabled and
+   offers Resume separately because the upstream one-second guard was insufficient.
+
+Candidate PRs #19917, #20064, and #20203 are not included. Signalbox #779 had
+not marked them adopted when this build was assembled. No other candidate PRs
+from that issue are included.
+
+Build with the upstream packaging script and
+`--build-version 0.1.1-preview.20261017.1`. The preview version is a build-time
+flag: upstream deliberately omits its update feed, so this app cannot update
+to stock releases. Do not add an update feed or change user settings.
+
+For later builds, merge a pinned new `upstream/main` into this branch, then
+merge newly adopted PR heads with `--no-ff`. Never rebase published history.
+Recheck existing fixes for overlap, update this merge list and the preview
+version, and repeat fixture checks before packaging.
+
+```sh
+cp .env.example .env
+taskpolicy -b nice -n 19 pnpm install --frozen-lockfile
+taskpolicy -b nice -n 19 node scripts/build-desktop-artifact.ts \
+  --platform mac --target dmg --arch arm64 \
+  --build-version 0.1.1-preview.20261017.1 \
+  --output-dir "$HOME/Applications-patched" --verbose
+```
+
+The public `.env.example` preserves T3 Connect configuration. No signing keys
+are required. Keep the built app outside this clone, and remove the clone's
+`node_modules` after verification. See `~/Documents/signalbox-design/patched-t3code.md`
+for the artifact location, checks, switching, and rollback instructions.
