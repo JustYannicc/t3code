@@ -117,6 +117,25 @@ describe("makeThrottledReader", () => {
     }),
   );
 
+  it.effect("lets the last answer go when a failed request outlasts keepLastMs", () =>
+    Effect.gen(function* () {
+      const reader = yield* makeThrottledReader<number, Refused>(pacing);
+      expect(yield* reader.read("claude", Effect.succeed(10))).toBe(10);
+      yield* TestClock.adjust(15 * MINUTE - 1);
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const slowRefusal = Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.andThen(Effect.fail(new Refused())),
+      );
+      const fiber = yield* Effect.forkChild(reader.read("claude", slowRefusal));
+      yield* Deferred.await(started);
+      yield* TestClock.adjust(1);
+      yield* Deferred.succeed(release, undefined);
+      expect(yield* Effect.flip(Fiber.join(fiber))).toBeInstanceOf(Refused);
+    }),
+  );
+
   it.effect("forget makes the next read ask, and drops the old answer and wait", () =>
     Effect.gen(function* () {
       const reader = yield* makeThrottledReader<number, Refused>(pacing);
@@ -128,6 +147,31 @@ describe("makeThrottledReader", () => {
       yield* reader.forget("codex");
       expect(yield* Effect.flip(reader.read("codex", source.request))).toBeInstanceOf(Refused);
       expect(source.calls()).toBe(3);
+    }),
+  );
+
+  it.effect("keeps pacing a forgotten key after its old entry is pruned", () =>
+    Effect.gen(function* () {
+      const reader = yield* makeThrottledReader<number, Refused>(pacing);
+      yield* reader.read("codex", Effect.succeed(10));
+      yield* reader.forget("codex");
+      yield* reader.read("codex", Effect.succeed(20));
+      // The entry goes stale; another key's answer prunes it while codex is asked.
+      yield* TestClock.adjust(15 * MINUTE);
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const slow = Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.as(30),
+      );
+      const fiber = yield* Effect.forkChild(reader.read("codex", slow));
+      yield* Deferred.await(started);
+      yield* reader.read("claude", Effect.succeed(1));
+      yield* Deferred.succeed(release, undefined);
+      expect(yield* Fiber.join(fiber)).toBe(30);
+      const next = answering([40]);
+      expect(yield* reader.read("codex", next.request)).toBe(30);
+      expect(next.calls()).toBe(0);
     }),
   );
 

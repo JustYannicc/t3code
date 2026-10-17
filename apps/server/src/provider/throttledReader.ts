@@ -55,55 +55,63 @@ interface Entry<A, E> {
  */
 export const makeThrottledReader = <A, E>(pacing: ReadPacing) =>
   Effect.gen(function* () {
-    const entries = yield* Ref.make<ReadonlyMap<string, Entry<A, E>>>(new Map());
-    const generations = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+    const state = yield* Ref.make<{
+      readonly entries: ReadonlyMap<string, Entry<A, E>>;
+      /** Bumped by each `forget`, so reads in flight across one don't store their answers. */
+      readonly forgets: number;
+    }>({ entries: new Map(), forgets: 0 });
     const keepLastMs = pacing.keepLastMs ?? Number.POSITIVE_INFINITY;
+    // Past this age an entry is due and its answer too old to stand in, so it
+    // is the same as no entry; dropping it keeps removed keys from piling up.
+    const staleAfterMs = Math.max(pacing.maxIntervalMs, keepLastMs);
+    const keepable = (entry: Entry<A, E> | undefined, now: number) =>
+      entry?.last && now - entry.last.at < keepLastMs ? entry.last : undefined;
 
     const read = <R>(key: string, request: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
-        const generation = (yield* Ref.get(generations)).get(key) ?? 0;
-        const entry = (yield* Ref.get(entries)).get(key);
-        const last = entry?.last && now - entry.last.at < keepLastMs ? entry.last : undefined;
+        const known = yield* Ref.get(state);
+        const entry = known.entries.get(key);
         if (entry && !readDue(pacing, entry.attemptedAt, now, entry.failedInARow)) {
-          if (last) return last.value;
+          const standing = keepable(entry, now);
+          if (standing) return standing.value;
           if (entry.error !== undefined) return yield* Effect.fail(entry.error);
         }
         const outcome = yield* Effect.result(request);
-        const next: Entry<A, E> = Result.isSuccess(outcome)
-          ? {
-              attemptedAt: now,
-              failedInARow: 0,
-              last: { value: outcome.success, at: now },
-              error: undefined,
-            }
-          : {
-              attemptedAt: now,
-              failedInARow: (entry?.failedInARow ?? 0) + 1,
-              last,
-              error: outcome.failure,
-            };
-        // Forgotten while the request ran: its answer may predate the change.
-        if (((yield* Ref.get(generations)).get(key) ?? 0) === generation) {
-          yield* Ref.update(entries, (current) => new Map(current).set(key, next));
-        }
+        // Checked again after the request, which may have outlasted keepLastMs.
+        const last = Result.isSuccess(outcome)
+          ? undefined
+          : keepable(entry, yield* Clock.currentTimeMillis);
+        yield* Ref.update(state, (current) => {
+          // Forgotten while the request ran: its answer may predate the change.
+          if (current.forgets !== known.forgets) return current;
+          const entries = new Map<string, Entry<A, E>>();
+          for (const [other, kept] of current.entries) {
+            if (now - kept.attemptedAt < staleAfterMs) entries.set(other, kept);
+          }
+          entries.set(key, {
+            attemptedAt: now,
+            ...(Result.isSuccess(outcome)
+              ? { failedInARow: 0, last: { value: outcome.success, at: now }, error: undefined }
+              : {
+                  failedInARow: (entry?.failedInARow ?? 0) + 1,
+                  last,
+                  error: outcome.failure,
+                }),
+          });
+          return { ...current, entries };
+        });
         if (Result.isSuccess(outcome)) return outcome.success;
         if (last) return last.value;
         return yield* Effect.fail(outcome.failure);
       });
 
     const forget = (key: string) =>
-      Effect.andThen(
-        Ref.update(generations, (current) =>
-          new Map(current).set(key, (current.get(key) ?? 0) + 1),
-        ),
-        Ref.update(entries, (current) => {
-          if (!current.has(key)) return current;
-          const next = new Map(current);
-          next.delete(key);
-          return next;
-        }),
-      );
+      Ref.update(state, (current) => {
+        const entries = new Map(current.entries);
+        entries.delete(key);
+        return { entries, forgets: current.forgets + 1 };
+      });
 
     return { read, forget };
   });
