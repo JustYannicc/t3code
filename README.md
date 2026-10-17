@@ -157,6 +157,7 @@ Merge order for the 2026-10-17 build:
 4. Cherry-pick the reviewed follow-up from Signalbox #781, `e101c52f4535`,
    retaining its source attribution. It keeps the old Stop target disabled and
    offers Resume separately because the upstream one-second guard was insufficient.
+   The upstream port removes its Signalbox-only `sendLock` reference.
 
 Candidate PRs #19917, #20064, and #20203 are not included. Signalbox #779 had
 not marked them adopted when this build was assembled. No other candidate PRs
@@ -175,7 +176,8 @@ version, and repeat fixture checks before packaging.
 ```sh
 cp .env.example .env
 taskpolicy -b nice -n 19 pnpm install --frozen-lockfile
-taskpolicy -b nice -n 19 node scripts/build-desktop-artifact.ts \
+RUSTUP_TOOLCHAIN=stable PATH="$PWD/node_modules/.bin:$PATH" \
+  taskpolicy -b nice -n 19 node scripts/build-desktop-artifact.ts \
   --platform mac --target dmg --arch arm64 \
   --build-version 0.1.1-preview.20261017.1 \
   --output-dir "$HOME/Applications-patched" --verbose

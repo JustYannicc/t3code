@@ -378,7 +378,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     </Tooltip>
   );
   // Keep the old Stop target inert. A cooldown still resumes if repeat clicks outlast it.
-  if (showResume && stopPhase === "landed" && !sendLock?.locked) {
+  if (showResume && stopPhase === "landed") {
     return (
       <div className="flex items-center gap-2">
         {submit}
