@@ -211,7 +211,9 @@ export function resolveClaudeCatalogEffort(
 ): string | undefined {
   if (!resolveClaudeCatalogModel(catalog, model)) {
     const effort = raw?.trim();
-    return effort && ["low", "medium", "high", "xhigh", "max"].includes(effort) ? effort : undefined;
+    return effort && ["low", "medium", "high", "xhigh", "max"].includes(effort)
+      ? effort
+      : undefined;
   }
 
   const caps = getClaudeCatalogModelCapabilities(catalog, model);
