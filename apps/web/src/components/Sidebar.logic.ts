@@ -725,7 +725,7 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
  * completion, a thread nobody has opened yet (an automation's, say) counts:
  * its failure still needs someone.
  */
-export function hasUnseenFailure(thread: ThreadStatusInput): boolean {
+function hasUnseenFailure(thread: ThreadStatusInput): boolean {
   if (thread.latestRun?.status !== "failed") return false;
   if (!thread.lastVisitedAt) return true;
   const completedAt = Date.parse(thread.latestRun.completedAt ?? "");
