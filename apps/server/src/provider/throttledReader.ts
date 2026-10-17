@@ -7,6 +7,7 @@
  *
  * @module provider/throttledReader
  */
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
@@ -47,71 +48,64 @@ interface Entry<A, E> {
  * `read(key, request)` runs `request` only when `key` is due and otherwise
  * returns its last answer. A failed request returns the last answer while it
  * is younger than `keepLastMs`, and fails otherwise; while the key then waits,
- * reads fail with the same error without asking.
+ * reads fail with the same error without asking. Reads of one key run one at
+ * a time, so a read waiting behind another gets its answer without asking.
  *
- * `forget(key)` drops everything known about `key`. A read still in flight
- * then does not store its older answer. Callers run reads of one key one at a
- * time; two at once may both ask.
+ * `forget(key)` drops everything known about `key`, after any read of it still
+ * in flight, so that read's older answer doesn't stand.
  */
 export const makeThrottledReader = <A, E>(pacing: ReadPacing) =>
   Effect.gen(function* () {
-    const state = yield* Ref.make<{
-      readonly entries: ReadonlyMap<string, Entry<A, E>>;
-      /** Bumped by each `forget`, so reads in flight across one don't store their answers. */
-      readonly forgets: number;
-    }>({ entries: new Map(), forgets: 0 });
+    const entries = yield* Ref.make<ReadonlyMap<string, Entry<A, E>>>(new Map());
+    const oneAtATime = yield* KeyedLock.make<string>();
     const keepLastMs = pacing.keepLastMs ?? Number.POSITIVE_INFINITY;
-    // Past this age an entry is due and its answer too old to stand in, so it
-    // is the same as no entry; dropping it keeps removed keys from piling up.
-    const staleAfterMs = Math.max(pacing.maxIntervalMs, keepLastMs);
     const keepable = (entry: Entry<A, E> | undefined, now: number) =>
       entry?.last && now - entry.last.at < keepLastMs ? entry.last : undefined;
 
     const read = <R>(key: string, request: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-      Effect.gen(function* () {
-        const now = yield* Clock.currentTimeMillis;
-        const known = yield* Ref.get(state);
-        const entry = known.entries.get(key);
-        if (entry && !readDue(pacing, entry.attemptedAt, now, entry.failedInARow)) {
-          const standing = keepable(entry, now);
-          if (standing) return standing.value;
-          if (entry.error !== undefined) return yield* Effect.fail(entry.error);
-        }
-        const outcome = yield* Effect.result(request);
-        // Checked again after the request, which may have outlasted keepLastMs.
-        const last = Result.isSuccess(outcome)
-          ? undefined
-          : keepable(entry, yield* Clock.currentTimeMillis);
-        yield* Ref.update(state, (current) => {
-          // Forgotten while the request ran: its answer may predate the change.
-          if (current.forgets !== known.forgets) return current;
-          const entries = new Map<string, Entry<A, E>>();
-          for (const [other, kept] of current.entries) {
-            if (now - kept.attemptedAt < staleAfterMs) entries.set(other, kept);
+      oneAtATime.withLock(
+        key,
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          const entry = (yield* Ref.get(entries)).get(key);
+          if (entry && !readDue(pacing, entry.attemptedAt, now, entry.failedInARow)) {
+            const standing = keepable(entry, now);
+            if (standing) return standing.value;
+            if (entry.error !== undefined) return yield* Effect.fail(entry.error);
           }
-          entries.set(key, {
-            attemptedAt: now,
-            ...(Result.isSuccess(outcome)
-              ? { failedInARow: 0, last: { value: outcome.success, at: now }, error: undefined }
-              : {
-                  failedInARow: (entry?.failedInARow ?? 0) + 1,
-                  last,
-                  error: outcome.failure,
-                }),
-          });
-          return { ...current, entries };
-        });
-        if (Result.isSuccess(outcome)) return outcome.success;
-        if (last) return last.value;
-        return yield* Effect.fail(outcome.failure);
-      });
+          const outcome = yield* Effect.result(request);
+          // Checked again after the request, which may have outlasted keepLastMs.
+          const last = Result.isSuccess(outcome)
+            ? undefined
+            : keepable(entry, yield* Clock.currentTimeMillis);
+          yield* Ref.update(entries, (current) =>
+            new Map(current).set(key, {
+              attemptedAt: now,
+              ...(Result.isSuccess(outcome)
+                ? { failedInARow: 0, last: { value: outcome.success, at: now }, error: undefined }
+                : {
+                    failedInARow: (entry?.failedInARow ?? 0) + 1,
+                    last,
+                    error: outcome.failure,
+                  }),
+            }),
+          );
+          if (Result.isSuccess(outcome)) return outcome.success;
+          if (last) return last.value;
+          return yield* Effect.fail(outcome.failure);
+        }),
+      );
 
     const forget = (key: string) =>
-      Ref.update(state, (current) => {
-        const entries = new Map(current.entries);
-        entries.delete(key);
-        return { entries, forgets: current.forgets + 1 };
-      });
+      oneAtATime.withLock(
+        key,
+        Ref.update(entries, (current) => {
+          if (!current.has(key)) return current;
+          const next = new Map(current);
+          next.delete(key);
+          return next;
+        }),
+      );
 
     return { read, forget };
   });

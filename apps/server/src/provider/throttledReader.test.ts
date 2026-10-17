@@ -150,32 +150,28 @@ describe("makeThrottledReader", () => {
     }),
   );
 
-  it.effect("keeps pacing a forgotten key after its old entry is pruned", () =>
+  it.effect("asks once when two reads of one key run at once", () =>
     Effect.gen(function* () {
       const reader = yield* makeThrottledReader<number, Refused>(pacing);
-      yield* reader.read("codex", Effect.succeed(10));
-      yield* reader.forget("codex");
-      yield* reader.read("codex", Effect.succeed(20));
-      // The entry goes stale; another key's answer prunes it while codex is asked.
-      yield* TestClock.adjust(15 * MINUTE);
       const started = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
       const slow = Deferred.succeed(started, undefined).pipe(
         Effect.andThen(Deferred.await(release)),
-        Effect.as(30),
+        Effect.as(10),
       );
-      const fiber = yield* Effect.forkChild(reader.read("codex", slow));
+      const first = yield* Effect.forkChild(reader.read("claude", slow));
       yield* Deferred.await(started);
-      yield* reader.read("claude", Effect.succeed(1));
+      const other = answering([99]);
+      const second = yield* Effect.forkChild(reader.read("claude", other.request), {
+        startImmediately: true,
+      });
       yield* Deferred.succeed(release, undefined);
-      expect(yield* Fiber.join(fiber)).toBe(30);
-      const next = answering([40]);
-      expect(yield* reader.read("codex", next.request)).toBe(30);
-      expect(next.calls()).toBe(0);
+      expect([yield* Fiber.join(first), yield* Fiber.join(second)]).toEqual([10, 10]);
+      expect(other.calls()).toBe(0);
     }),
   );
 
-  it.effect("does not store an answer that was in flight when the key was forgotten", () =>
+  it.effect("forget waits for a read in flight, then drops its answer", () =>
     Effect.gen(function* () {
       const reader = yield* makeThrottledReader<number, Refused>(pacing);
       const started = yield* Deferred.make<void>();
@@ -186,9 +182,12 @@ describe("makeThrottledReader", () => {
       );
       const fiber = yield* Effect.forkChild(reader.read("codex", slow));
       yield* Deferred.await(started);
-      yield* reader.forget("codex");
+      const forgetting = yield* Effect.forkChild(reader.forget("codex"), {
+        startImmediately: true,
+      });
       yield* Deferred.succeed(release, undefined);
       expect(yield* Fiber.join(fiber)).toBe(10);
+      yield* Fiber.join(forgetting);
       const fresh = answering([20]);
       expect(yield* reader.read("codex", fresh.request)).toBe(20);
     }),
