@@ -325,6 +325,10 @@ describe("CLIProxyAPI built-in management API", () => {
       const [account] = yield* api.readAccounts(config);
       expect(account?.email).toBe("new@example.com");
       expect(account?.usageLimits.windows[0]?.usedPercent).toBe(70);
+      // A Claude login replaced by Codex under the same file id and email.
+      listed[0] = { ...listed[0]!, provider: "codex" };
+      const [codex] = yield* api.readAccounts(config);
+      expect(codex?.driver).toBe("codex");
     }),
   );
 

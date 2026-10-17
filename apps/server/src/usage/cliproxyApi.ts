@@ -232,8 +232,6 @@ export const makeCliproxyApi = Effect.gen(function* () {
       .toSorted((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at));
   });
 
-  // UsageLimitSources runs every read and redeem under one lock, so reads of one
-  // account never overlap.
   const usageReads = yield* makeThrottledReader<
     UsageLimitSourceAccount,
     Effect.Error<ReturnType<typeof apiCall>> | Schema.SchemaError
@@ -241,9 +239,13 @@ export const makeCliproxyApi = Effect.gen(function* () {
   // A credential replaced under the same file id is a different account, so it
   // gets its own reading rather than the old account's identity and bars.
   const usageReadKey = (config: UsageLimitSourceConfig, account: typeof AuthFile.Type) =>
-    [config.url, account.id, account.email ?? "", account.id_token?.chatgpt_account_id ?? ""].join(
-      "\n",
-    );
+    [
+      config.url,
+      account.id,
+      account.provider,
+      account.email ?? "",
+      account.id_token?.chatgpt_account_id ?? "",
+    ].join("\n");
 
   const readAccount = Effect.fn("CliproxyApi.readAccount")(function* (
     config: UsageLimitSourceConfig,
