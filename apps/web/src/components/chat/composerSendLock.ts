@@ -7,27 +7,38 @@
  * Locks are keyed by `composerTargetKey` and live outside the draft store, so clearing a
  * draft never unlocks it. Only locked keys are kept, and they survive a reload.
  */
+import type { PreviewAnnotationPayload } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import { composerTargetKey, type ComposerThreadTarget } from "../../composerDraftStore";
+import {
+  composerTargetKey,
+  useComposerDraftStore,
+  type ComposerImageAttachment,
+  type ComposerThreadTarget,
+} from "../../composerDraftStore";
 import { resolveStorage } from "../../lib/storage";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import type { ComposerCommandItem } from "./ComposerCommandMenu";
 
-const SEND_LOCKED_REASON = "Sending locked. Click the lock to unlock";
+export const SEND_LOCKED_REASON = "Sending is locked for this draft";
 
 interface ComposerSendLockState {
   lockedTargetKeys: Record<string, true>;
   toggleSendLocked: (targetKey: string) => void;
+  setSendLocked: (targetKey: string, locked: boolean) => void;
 }
 
 export const useComposerSendLockStore = create<ComposerSendLockState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       lockedTargetKeys: {},
       toggleSendLocked: (targetKey) =>
+        get().setSendLocked(targetKey, !get().lockedTargetKeys[targetKey]),
+      setSendLocked: (targetKey, locked) =>
         set((state) => {
-          if (!state.lockedTargetKeys[targetKey]) {
+          if (locked === (state.lockedTargetKeys[targetKey] === true)) return state;
+          if (locked) {
             return { lockedTargetKeys: { ...state.lockedTargetKeys, [targetKey]: true } };
           }
           const { [targetKey]: _removed, ...lockedTargetKeys } = state.lockedTargetKeys;
@@ -50,21 +61,43 @@ function isComposerSendLocked(target: ComposerThreadTarget): boolean {
 }
 
 export interface ComposerSendLock {
-  /** The lock's own state, which the shackle shows. */
+  /** The lock's own state, which picks `/lock` or `/unlock`. */
   on: boolean;
   /** The lock holds right now: free-text sends are refused and Enter adds a line. */
   locked: boolean;
   /** Why sending is disabled, while the lock holds. */
   disabledReason: string | null;
-  toggle: () => void;
+  setLocked: (locked: boolean) => void;
 }
 
 /** ChatComposer's lock for the open draft. `answeringAgent` lifts the hold, not the lock. */
 export function useComposerSendLock(targetKey: string, answeringAgent: boolean): ComposerSendLock {
   const on = useComposerSendLockStore((state) => state.lockedTargetKeys[targetKey] === true);
   const locked = on && !answeringAgent;
-  const toggle = () => useComposerSendLockStore.getState().toggleSendLocked(targetKey);
-  return { on, locked, disabledReason: locked ? SEND_LOCKED_REASON : null, toggle };
+  const setLocked = (next: boolean) =>
+    useComposerSendLockStore.getState().setSendLocked(targetKey, next);
+  return { on, locked, disabledReason: locked ? SEND_LOCKED_REASON : null, setLocked };
+}
+
+/** Built-in slash item for the current draft's lock state. */
+export function sendLockSlashCommandItem(
+  on: boolean,
+): Extract<ComposerCommandItem, { type: "slash-command" }> {
+  return on
+    ? {
+        id: "slash:unlock",
+        type: "slash-command",
+        command: "unlock",
+        label: "/unlock",
+        description: "Let this draft send again",
+      }
+    : {
+        id: "slash:lock",
+        type: "slash-command",
+        command: "lock",
+        label: "/lock",
+        description: "Lock sending for this draft: Enter adds a line",
+      };
 }
 
 /** ChatView's `composer.toggleSendLock` shortcut. */
@@ -85,11 +118,28 @@ export function toggleComposerSendLockFromShortcut(
  */
 export function holdLockedComposerSend(
   target: ComposerThreadTarget,
-  input: { annotation: boolean; answeringPlan: boolean },
+  input: {
+    annotation:
+      | { annotation: PreviewAnnotationPayload; image: ComposerImageAttachment | null }
+      | undefined;
+    answeringPlan: boolean;
+  },
 ): boolean {
   if (input.answeringPlan && !input.annotation) return false;
   if (!isComposerSendLocked(target)) return false;
   if (input.annotation) {
+    // PreviewView writes to the thread draft. A queued-message edit has its own
+    // target, so retain the annotation there too before holding the send.
+    const { annotation, image } = input.annotation;
+    const drafts = useComposerDraftStore.getState();
+    if (image) drafts.addImages(target, [image]);
+    const imageAttached = drafts
+      .getComposerDraft(target)
+      ?.images.some((entry) => entry.id === image?.id);
+    drafts.addPreviewAnnotation(target, {
+      ...annotation,
+      screenshot: imageAttached ? annotation.screenshot : null,
+    });
     toastManager.add(
       stackedThreadToast({
         type: "info",

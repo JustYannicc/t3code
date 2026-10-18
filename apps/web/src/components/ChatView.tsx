@@ -6009,7 +6009,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     if (
       holdLockedComposerSend(composerDraftTarget, {
-        annotation: directAnnotation !== undefined,
+        annotation: directAnnotation,
         answeringPlan: showPlanFollowUpPrompt,
       })
     ) {

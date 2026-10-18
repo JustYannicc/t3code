@@ -13,7 +13,7 @@ import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { composerFloatingLayerProps } from "./composerEventScope";
 import type { ComposerSendLock } from "./composerSendLock";
-import { ComposerSendLockLatch } from "./ComposerSendLockLatch";
+import { LockedSendButton } from "./LockedSendButton";
 import {
   alternateComposerDispatchAction,
   resolveComposerDispatchMode,
@@ -55,7 +55,7 @@ interface ComposerPrimaryActionsProps {
   compactBeforeSendTokens?: number | null;
   keepFullHistory?: boolean;
   onToggleKeepFullHistory?: () => void;
-  /** Draws the padlock shackle on the send button. */
+  /** While it holds, Send becomes a padlock that explains and unlocks. */
   sendLock?: ComposerSendLock;
 }
 
@@ -351,26 +351,18 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-          {sendLock?.locked ? (
-            <path
-              d="M2.5 11.5L11.5 2.5"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            />
-          ) : null}
         </svg>
       )}
     </button>
   );
 
-  const submit = (
-    <ComposerSendLockLatch key="submit" lock={sendLock}>
-      <Tooltip>
-        <TooltipTrigger render={<span className="inline-flex" />}>{sendButton}</TooltipTrigger>
-        <TooltipPopup>{submitTooltip}</TooltipPopup>
-      </Tooltip>
-    </ComposerSendLockLatch>
+  const submit = sendLock?.locked ? (
+    <LockedSendButton onUnlock={() => sendLock.setLocked(false)} />
+  ) : (
+    <Tooltip key="submit">
+      <TooltipTrigger render={<span className="inline-flex" />}>{sendButton}</TooltipTrigger>
+      <TooltipPopup>{submitTooltip}</TooltipPopup>
+    </Tooltip>
   );
   if (compactTokens === null) return submit;
 
