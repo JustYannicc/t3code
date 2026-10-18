@@ -16,6 +16,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -216,54 +217,63 @@ const asSession = (providerSessionId: string) => ({
   ...scope,
   thread: { ...testThread, providerSessionId },
 });
-const dependencies = Layer.mergeAll(
-  Broker.layer,
-  Manager.layer,
-  Layer.succeed(ServerEnvironment.ServerEnvironment, {
-    getEnvironmentId: Effect.succeed(scope.environmentId),
-    getDescriptor: Effect.die("unused descriptor"),
-  }),
-  Layer.succeed(PreviewBrowser.PreviewBrowser, {
-    executable: Effect.die("mock Chromium does not need an executable"),
-    installed: Effect.die("mock Chromium does not need an executable"),
-  }),
-  Layer.succeed(DesktopChannel.DesktopBrowserChannel, {
-    available: true,
-    awaitAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
-    detached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          const onDetach = (key: { threadId: string; tabId: string }) =>
-            Queue.offerUnsafe(queue, key);
-          desktopDetaches.on("detach", onDetach);
-          return onDetach;
-        }),
-        (onDetach) => Effect.sync(() => desktopDetaches.off("detach", onDetach)),
+const dependenciesAt = (home: string | { readonly prefix: string }) =>
+  Layer.mergeAll(
+    Broker.layer,
+    Manager.layer,
+    Layer.succeed(ServerEnvironment.ServerEnvironment, {
+      getEnvironmentId: Effect.succeed(scope.environmentId),
+      getDescriptor: Effect.die("unused descriptor"),
+    }),
+    Layer.succeed(PreviewBrowser.PreviewBrowser, {
+      executable: Effect.die("mock Chromium does not need an executable"),
+      installed: Effect.die("mock Chromium does not need an executable"),
+    }),
+    Layer.succeed(DesktopChannel.DesktopBrowserChannel, {
+      available: true,
+      awaitAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
+      detached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            const onDetach = (key: { threadId: string; tabId: string }) =>
+              Queue.offerUnsafe(queue, key);
+            desktopDetaches.on("detach", onDetach);
+            return onDetach;
+          }),
+          (onDetach) => Effect.sync(() => desktopDetaches.off("detach", onDetach)),
+        ),
       ),
-    ),
-    attached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
-      Effect.acquireRelease(
-        Effect.sync(() => {
-          const onAttach = (key: { threadId: string; tabId: string }) =>
-            Queue.offerUnsafe(queue, key);
-          desktopDetaches.on("attach", onAttach);
-          return onAttach;
-        }),
-        (onAttach) => Effect.sync(() => desktopDetaches.off("attach", onAttach)),
+      attached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            const onAttach = (key: { threadId: string; tabId: string }) =>
+              Queue.offerUnsafe(queue, key);
+            desktopDetaches.on("attach", onAttach);
+            return onAttach;
+          }),
+          (onAttach) => Effect.sync(() => desktopDetaches.off("attach", onAttach)),
+        ),
       ),
-    ),
-    isAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
-    endpoint: (key) =>
-      Effect.acquireRelease(Effect.succeed(`ws://desktop/${key.tabId}`), () =>
-        Effect.sync(() => releasedDesktopTabs.push(key.tabId)),
-      ),
-    pointer: () => Effect.void,
-  }),
-).pipe(
-  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-server-browser-" })),
-  Layer.provideMerge(NodeServices.layer),
-);
-const layer = ServerBrowser.layer.pipe(Layer.provideMerge(dependencies));
+      isAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
+      endpoint: (key) =>
+        Effect.acquireRelease(Effect.succeed(`ws://desktop/${key.tabId}`), () =>
+          Effect.sync(() => releasedDesktopTabs.push(key.tabId)),
+        ),
+      pointer: () => Effect.void,
+    }),
+  ).pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), home)),
+    Layer.provideMerge(NodeServices.layer),
+  );
+const layerAt = (home: string | { readonly prefix: string }) =>
+  ServerBrowser.layer.pipe(Layer.provideMerge(dependenciesAt(home)));
+const layer = layerAt({ prefix: "t3-server-browser-" });
+const savedProfilesPath = (home: string) =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const { stateDir } = yield* ServerConfig.deriveServerPaths(home, undefined);
+    return path.join(stateDir, "server-browser", "reported-profiles.json");
+  });
 const ready = Effect.gen(function* () {
   const browser = yield* ServerBrowser.ServerBrowser;
   const broker = yield* Broker.PreviewAutomationBroker;
@@ -1585,6 +1595,99 @@ it.live("an agent tab keeps throwaway storage when no client reported profiles",
       expect(contextRequests).toEqual([{ profileId: "default", isolated: true }]);
     }),
   ).pipe(Effect.provide(layer)),
+);
+
+it.live("an agent tab opens a reported profile after restart before a client reports", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-server-browser-restart-" });
+    const profiles = Array.from({ length: 24 }, (_, index) => ({
+      id: `profile-${index}`,
+      name: `Profile ${index}`,
+      kind: "persistent" as const,
+    }));
+    yield* Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      yield* browser.reportProfiles({ profiles, defaultProfileId: "profile-0" });
+    }).pipe(Effect.scoped, Effect.provide(layerAt(home)));
+
+    const opened = yield* Effect.gen(function* () {
+      const broker = yield* Broker.PreviewAutomationBroker;
+      yield* Effect.yieldNow;
+      return yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        operation: "open",
+        input: { reuseExistingTab: false, show: false, profileId: "profile-23" },
+      });
+    }).pipe(Effect.scoped, Effect.provide(layerAt(home)));
+    const openedDefault = yield* Effect.gen(function* () {
+      const broker = yield* Broker.PreviewAutomationBroker;
+      yield* Effect.yieldNow;
+      return yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+    }).pipe(Effect.scoped, Effect.provide(layerAt(home)));
+
+    expect(contextRequests).toEqual([
+      { profileId: "profile-23", isolated: false },
+      { profileId: "profile-0", isolated: false },
+    ]);
+    expect(opened.defaultProfileId).toBe("profile-0");
+    expect(openedDefault.defaultProfileId).toBe("profile-0");
+    expect(opened.profiles).toHaveLength(26);
+    expect(opened.profiles).toContainEqual({ id: "profile-23", name: "Profile 23" });
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.live("a repeated profile report does not rewrite the saved catalog", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-server-browser-repeat-" });
+    const path = yield* savedProfilesPath(home);
+    yield* Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const report = (defaultProfileId: string) =>
+        browser.reportProfiles({
+          profiles: [{ id: "profile-work", name: "Work", kind: "persistent" }],
+          defaultProfileId,
+        });
+      const inode = fs.stat(path).pipe(Effect.map((info) => Option.getOrThrow(info.ino)));
+
+      yield* report("profile-work");
+      const first = yield* inode;
+      yield* report("profile-work");
+      expect(yield* inode).toBe(first);
+      yield* report("default");
+      expect(yield* inode).not.toBe(first);
+    }).pipe(Effect.scoped, Effect.provide(layerAt(home)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.live("an invalid saved profile catalog falls back to built-in profiles", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-server-browser-corrupt-" });
+    const file = yield* savedProfilesPath(home);
+    yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+    yield* fs.writeFileString(file, '{"profiles":[{"id":');
+
+    const opened = yield* Effect.gen(function* () {
+      const broker = yield* Broker.PreviewAutomationBroker;
+      yield* Effect.yieldNow;
+      return yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+    }).pipe(Effect.scoped, Effect.provide(layerAt(home)));
+
+    expect(contextRequests).toEqual([{ profileId: "default", isolated: true }]);
+    expect(opened.defaultProfileId).toBeUndefined();
+    expect(opened.profiles?.map((profile) => profile.id)).toEqual(["default", "incognito"]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
 it.live("a desktop page that comes back reconnects without waiting for a viewer", () =>

@@ -2,13 +2,15 @@
 // Screencasts ignore emulated device scale; real 2x keeps captures sharp.
 // --disable-gpu uses cheaper software compositing while preserving SwiftShader WebGL.
 import {
+  BROWSER_PROFILE_MAX_COUNT,
   BUILT_IN_BROWSER_PROFILES,
+  BrowserProfile,
+  BrowserProfileId,
   DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
   findBrowserProfile,
   INCOGNITO_BROWSER_PROFILE_ID,
   resolveBrowserProfiles,
-  type BrowserProfile,
   type PreviewReportProfilesInput,
   PREVIEW_AUTOMATION_SERVER_OPERATIONS,
   PreviewViewportSetting as PreviewViewportSettingSchema,
@@ -42,6 +44,7 @@ import {
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
   type PreviewAppearancePreference,
 } from "@t3tools/contracts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { resolvePreviewViewport } from "@t3tools/shared/previewViewport";
@@ -51,12 +54,15 @@ import * as NodePath from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import { constVoid } from "effect/Function";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Exit from "effect/Exit";
+import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -122,6 +128,15 @@ const UNATTACHED_FILL_VIEWPORT = { width: 1280, height: 800 } as const;
 const NAVIGATION_TIMEOUT_MS = 15_000;
 const VIEWER_NAVIGATION_OPTIONS = { waitUntil: "commit", timeout: NAVIGATION_TIMEOUT_MS } as const;
 const ACTION_TIMELINE_LIMIT = 50;
+const SavedBrowserProfileCatalog = Schema.Struct({
+  profiles: Schema.Array(BrowserProfile).check(
+    Schema.isMaxLength(BROWSER_PROFILE_MAX_COUNT + BUILT_IN_BROWSER_PROFILES.length),
+  ),
+  defaultProfileId: BrowserProfileId,
+});
+const SavedBrowserProfilesJson = Schema.fromJsonString(SavedBrowserProfileCatalog);
+const decodeSavedProfiles = Schema.decodeUnknownEffect(SavedBrowserProfilesJson);
+const encodeSavedProfiles = Schema.encodeEffect(SavedBrowserProfilesJson);
 
 export class ServerBrowserTabNotFoundError extends Schema.TaggedError<ServerBrowserTabNotFoundError>()(
   "ServerBrowserTabNotFoundError",
@@ -1271,15 +1286,55 @@ const make = Effect.gen(function* () {
     readonly defaultProfileId: string;
   } | null = null;
 
+  const resolveProfileCatalog = (input: PreviewReportProfilesInput) => {
+    const profiles = resolveBrowserProfiles(input.profiles);
+    return {
+      profiles,
+      defaultProfileId:
+        findBrowserProfile(profiles, input.defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID,
+    };
+  };
+
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const savedProfilesPath = path.join(config.stateDir, "server-browser", "reported-profiles.json");
+  let savedProfilesJson: string | null = null;
+  const saveLock = yield* Semaphore.make(1);
+
+  yield* Effect.gen(function* () {
+    const json = yield* fileSystem.readFileString(savedProfilesPath);
+    reportedProfiles = resolveProfileCatalog(yield* decodeSavedProfiles(json));
+    savedProfilesJson = json;
+  }).pipe(
+    Effect.catchReason("PlatformError", "NotFound", () => Effect.void),
+    Effect.catch((cause) =>
+      Effect.logWarning("Ignoring unreadable saved browser profiles", { cause }),
+    ),
+  );
+
+  /** Save the latest catalog under the lock so concurrent reports cannot finish out of order. */
+  const saveProfiles = saveLock
+    .withPermits(1)(
+      Effect.gen(function* () {
+        if (reportedProfiles === null) return;
+        const json = yield* encodeSavedProfiles(reportedProfiles);
+        if (json === savedProfilesJson) return;
+        yield* writeFileStringAtomically({ filePath: savedProfilesPath, contents: json });
+        savedProfilesJson = json;
+      }),
+    )
+    .pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not save the reported browser profiles", { cause }),
+      ),
+    );
+
   const reportProfiles: ServerBrowser["Service"]["reportProfiles"] = (input) =>
     Effect.sync(() => {
-      const profiles = resolveBrowserProfiles(input.profiles);
-      reportedProfiles = {
-        profiles,
-        defaultProfileId:
-          findBrowserProfile(profiles, input.defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID,
-      };
-    });
+      reportedProfiles = resolveProfileCatalog(input);
+    }).pipe(Effect.andThen(saveProfiles));
 
   const profileStatus = () => {
     const profiles = reportedProfiles?.profiles ?? BUILT_IN_BROWSER_PROFILES;
