@@ -1,11 +1,8 @@
-import {
-  OrchestratorMcpFailure,
-  type AuthEnvironmentScope,
-  WsRpcGroup,
-} from "@t3tools/contracts";
+import { type AuthEnvironmentScope, WsRpcGroup } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type * as Scope from "effect/Scope";
+import type * as Rpc from "effect/rpc/Rpc";
+import type { RpcClientError } from "effect/rpc/RpcClientError";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcSchema from "effect/rpc/RpcSchema";
 
@@ -25,6 +22,7 @@ export type RpcReachDecision =
       readonly method: WsRpcMethod;
       readonly kind: "call";
       readonly requiredScope: AuthEnvironmentScope;
+      readonly description: string;
     }
   | {
       readonly method: WsRpcMethod;
@@ -42,10 +40,15 @@ const buildReachDecisions = (): Readonly<Record<WsRpcMethod, RpcReachDecision>> 
         reach.kind !== "derived"
           ? { method: method as WsRpcMethod, kind: reach.kind, reason: reach.reason, requiredScope }
           : requiredScope === undefined
-          ? { method: method as WsRpcMethod, kind: "gap", reason: "authorization-scope-missing" }
-          : RpcSchema.isStreamSchema(rpc.successSchema)
-            ? { method: method as WsRpcMethod, kind: "gap", reason: "streaming", requiredScope }
-            : { method: method as WsRpcMethod, kind: "call", requiredScope };
+            ? { method: method as WsRpcMethod, kind: "gap", reason: "authorization-scope-missing" }
+            : RpcSchema.isStreamSchema(rpc.successSchema)
+              ? { method: method as WsRpcMethod, kind: "gap", reason: "streaming", requiredScope }
+              : {
+                  method: method as WsRpcMethod,
+                  kind: "call",
+                  requiredScope,
+                  description: reach.description,
+                };
       return [method, Object.freeze(decision)];
     }),
   ) as Record<WsRpcMethod, RpcReachDecision>;
@@ -60,26 +63,44 @@ const buildReachDecisions = (): Readonly<Record<WsRpcMethod, RpcReachDecision>> 
  */
 export const RPC_REACH_DECISIONS = buildReachDecisions();
 
+const rpcCodecs = new Map(
+  [...WsRpcGroup.requests].map(
+    ([method, rpc]) =>
+      [
+        method,
+        {
+          decodePayload: Schema.decodeUnknownEffect(rpc.payloadSchema),
+          encodeSuccess: Schema.encodeUnknownEffect(rpc.successSchema),
+          encodeError: Schema.encodeUnknownEffect(rpc.errorSchema),
+        },
+      ] as const,
+  ),
+);
+
 export type RpcReachSearchResult = RpcReachDecision & {
   readonly payloadSchema?: ReturnType<typeof Schema.toJsonSchemaDocument>;
+  readonly successSchema?: ReturnType<typeof Schema.toJsonSchemaDocument>;
+  readonly errorSchema?: ReturnType<typeof Schema.toJsonSchemaDocument>;
 };
 
 export const searchWsRpcReach = (
   query: string,
   limit = 20,
 ): ReadonlyArray<RpcReachSearchResult> => {
-  const needle = query.trim().toLowerCase();
-  if (needle.length === 0) return [];
+  const words = query.trim().toLowerCase().split(/\s+/u).filter(Boolean);
+  if (words.length === 0) return [];
 
   const boundedLimit = Number.isSafeInteger(limit) ? Math.min(Math.max(limit, 0), 50) : 20;
   return Object.values(RPC_REACH_DECISIONS)
     .filter((decision) => {
-      if (decision.method.toLowerCase().includes(needle)) return true;
-      if (decision.kind === "call") return decision.requiredScope.toLowerCase().includes(needle);
-      return (
-        decision.reason.toLowerCase().includes(needle) ||
-        (decision.requiredScope?.toLowerCase().includes(needle) ?? false)
-      );
+      const text = [
+        decision.method,
+        decision.requiredScope,
+        decision.kind === "call" ? decision.description : decision.reason,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return words.every((word) => text.includes(word));
     })
     .slice(0, boundedLimit)
     .map((decision) => {
@@ -89,12 +110,19 @@ export const searchWsRpcReach = (
       return {
         ...decision,
         payloadSchema: Schema.toJsonSchemaDocument(rpc.payloadSchema),
+        successSchema: Schema.toJsonSchemaDocument(rpc.successSchema),
+        errorSchema: Schema.toJsonSchemaDocument(rpc.errorSchema),
       };
     });
 };
 
-const callFailure = (code: string, message: string) =>
-  new OrchestratorMcpFailure({ code, message });
+export class AgentRpcFailure extends Schema.TaggedError<AgentRpcFailure>()("AgentRpcFailure", {
+  code: Schema.String,
+  message: Schema.String,
+  detail: Schema.optionalKey(Schema.Unknown),
+}) {}
+
+const callFailure = (code: string, message: string) => new AgentRpcFailure({ code, message });
 
 export interface WsRpcCallInput {
   readonly method: string;
@@ -105,7 +133,7 @@ export interface WsRpcCallInput {
 
 type UnaryRpcMethod = (
   payload: never,
-) => Effect.Effect<unknown, unknown, Scope.Scope>;
+) => Effect.Effect<unknown, Rpc.Error<RpcGroup.Rpcs<typeof WsRpcGroup>> | RpcClientError>;
 
 /**
  * Validates and authorizes a discovered RPC before invoking the existing
@@ -116,50 +144,77 @@ export const callWsRpc = Effect.fn("agentParity.callWsRpc")(function* <Client ex
   client: Client,
   input: WsRpcCallInput,
 ) {
-    if (!Object.hasOwn(RPC_REACH_DECISIONS, input.method)) {
-      return yield* Effect.fail(
-        callFailure("rpc_method_unavailable", `RPC method ${input.method} is not registered.`),
-      );
-    }
+  if (!Object.hasOwn(RPC_REACH_DECISIONS, input.method)) {
+    return yield* callFailure(
+      "rpc_method_unavailable",
+      `RPC method ${input.method} is not registered.`,
+    );
+  }
 
-    const decision = RPC_REACH_DECISIONS[input.method as WsRpcMethod];
-    if (decision.kind !== "call") {
-      const detail =
-        decision.reason === "streaming"
-          ? "streaming RPCs need a subscription-shaped interface"
-          : decision.reason;
-      return yield* Effect.fail(
-        callFailure("rpc_reach_gap", `RPC method ${decision.method} is a gap: ${detail}.`),
-      );
-    }
+  const decision = RPC_REACH_DECISIONS[input.method as WsRpcMethod];
+  if (decision.kind !== "call") {
+    const detail =
+      decision.reason === "streaming"
+        ? "streaming RPCs need a subscription-shaped interface"
+        : decision.reason;
+    return yield* callFailure(
+      "rpc_reach_gap",
+      `RPC method ${decision.method} is a gap: ${detail}.`,
+    );
+  }
 
-    const rpc = WsRpcGroup.requests.get(decision.method);
-    if (rpc === undefined) {
-      return yield* Effect.fail(
-        callFailure("rpc_method_unavailable", `RPC method ${decision.method} is not registered.`),
-      );
-    }
+  const codecs = rpcCodecs.get(decision.method);
+  if (codecs === undefined) {
+    return yield* callFailure(
+      "rpc_method_unavailable",
+      `RPC method ${decision.method} is not registered.`,
+    );
+  }
 
-    const payload = yield* Schema.decodeUnknownEffect(rpc.payloadSchema)(input.payload).pipe(
+  const payload = yield* codecs
+    .decodePayload(input.payload)
+    .pipe(
       Effect.mapError(() =>
         callFailure("rpc_payload_invalid", `Payload does not match ${decision.method}.`),
       ),
     );
-    const missingScope = requiredScopesForRpcCall(decision.method, payload).find(
-      (scope) => !input.grantedScopes.includes(scope),
-    );
-    if (missingScope !== undefined) return yield* Effect.fail(rpcAuthorizationError(missingScope));
+  const missingScope = requiredScopesForRpcCall(decision.method, payload).find(
+    (scope) => !input.grantedScopes.includes(scope),
+  );
+  if (missingScope !== undefined) return yield* rpcAuthorizationError(missingScope);
 
-    yield* readCaller().pipe(Effect.tap(assertLiveCaller));
-    const candidate = (client as Record<string, unknown>)[decision.method];
-    if (typeof candidate !== "function") {
-      return yield* Effect.fail(
-        callFailure(
-          "rpc_method_unavailable",
-          `The connected RPC client does not expose ${decision.method}.`,
-        ),
-      );
-    }
-    const invoke = candidate as UnaryRpcMethod;
-    return yield* invoke(payload as never);
+  yield* readCaller().pipe(Effect.tap(assertLiveCaller));
+  const candidate = (client as Record<string, unknown>)[decision.method];
+  if (typeof candidate !== "function") {
+    return yield* callFailure(
+      "rpc_method_unavailable",
+      `The connected RPC client does not expose ${decision.method}.`,
+    );
+  }
+  const invoke = candidate as UnaryRpcMethod;
+  const result = yield* invoke(payload as never).pipe(
+    Effect.catch((error) =>
+      codecs.encodeError(error).pipe(
+        Effect.matchEffect({
+          onFailure: () =>
+            Effect.fail(callFailure("rpc_call_failed", `RPC method ${decision.method} failed.`)),
+          onSuccess: (detail) =>
+            Effect.fail(
+              new AgentRpcFailure({
+                code: "rpc_call_failed",
+                message: `RPC method ${decision.method} failed.`,
+                detail,
+              }),
+            ),
+        }),
+      ),
+    ),
+  );
+  return yield* codecs
+    .encodeSuccess(result)
+    .pipe(
+      Effect.mapError(() =>
+        callFailure("rpc_result_invalid", `Result does not match ${decision.method}.`),
+      ),
+    );
 });
