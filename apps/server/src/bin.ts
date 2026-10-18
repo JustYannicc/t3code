@@ -18,6 +18,7 @@ if (
     const { runAcpMcpCliFastPath } = await import("./mcp/AcpMcpStdioBridge.ts");
     await runAcpMcpCliFastPath(command, process.argv.slice(3));
   } else {
+    (await import("./systemCertificates.ts")).trustSystemCertificates();
     // Before anything reads stdin: the desktop app's Windows launcher starts
     // the CLI without one. Never for the fast paths, whose stdin is a pipe.
     const { attachConsoleStdin } = await import("./cli/consoleStdin.ts");
