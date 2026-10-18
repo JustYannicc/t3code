@@ -6,7 +6,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
-import * as RpcGroup from "effect/rpc/RpcGroup";
+import type * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcSchema from "effect/rpc/RpcSchema";
 
 import {
@@ -14,6 +14,9 @@ import {
   requiredScopesForRpcCall,
   rpcAuthorizationError,
 } from "../auth/RpcAuthorization.ts";
+
+import { RPC_AGENT_REACH, type AgentReach } from "./AgentRpcReach.ts";
+import { assertLiveCaller, readCaller } from "./threadAccess.ts";
 
 type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
@@ -25,8 +28,8 @@ export type RpcReachDecision =
     }
   | {
       readonly method: WsRpcMethod;
-      readonly kind: "gap";
-      readonly reason: "streaming" | "authorization-scope-missing";
+      readonly kind: "gap" | "exempt";
+      readonly reason: string;
       readonly requiredScope?: AuthEnvironmentScope;
     };
 
@@ -34,8 +37,11 @@ const buildReachDecisions = (): Readonly<Record<WsRpcMethod, RpcReachDecision>> 
   const decisions = Object.fromEntries(
     [...WsRpcGroup.requests].map(([method, rpc]) => {
       const requiredScope = RPC_REQUIRED_SCOPES[method as WsRpcMethod];
+      const reach: AgentReach = RPC_AGENT_REACH[method as WsRpcMethod];
       const decision: RpcReachDecision =
-        requiredScope === undefined
+        reach.kind !== "derived"
+          ? { method: method as WsRpcMethod, kind: reach.kind, reason: reach.reason, requiredScope }
+          : requiredScope === undefined
           ? { method: method as WsRpcMethod, kind: "gap", reason: "authorization-scope-missing" }
           : RpcSchema.isStreamSchema(rpc.successSchema)
             ? { method: method as WsRpcMethod, kind: "gap", reason: "streaming", requiredScope }
@@ -54,9 +60,9 @@ const buildReachDecisions = (): Readonly<Record<WsRpcMethod, RpcReachDecision>> 
  */
 export const RPC_REACH_DECISIONS = buildReachDecisions();
 
-export interface RpcReachSearchResult extends RpcReachDecision {
-  readonly payloadSchema: ReturnType<typeof Schema.toJsonSchemaDocument>;
-}
+export type RpcReachSearchResult = RpcReachDecision & {
+  readonly payloadSchema?: ReturnType<typeof Schema.toJsonSchemaDocument>;
+};
 
 export const searchWsRpcReach = (
   query: string,
@@ -77,6 +83,7 @@ export const searchWsRpcReach = (
     })
     .slice(0, boundedLimit)
     .map((decision) => {
+      if (decision.kind !== "call") return decision;
       const rpc = WsRpcGroup.requests.get(decision.method);
       if (rpc === undefined) throw new Error(`RPC method ${decision.method} is not registered.`);
       return {
@@ -105,11 +112,10 @@ type UnaryRpcMethod = (
  * generated WebSocket client. RpcAuthorization runs the same check again on
  * the server, so this preflight cannot grant access the connection lacks.
  */
-export const callWsRpc = <Client extends object>(
+export const callWsRpc = Effect.fn("agentParity.callWsRpc")(function* <Client extends object>(
   client: Client,
   input: WsRpcCallInput,
-): Effect.Effect<unknown, unknown, Scope.Scope> =>
-  Effect.gen(function* () {
+) {
     if (!Object.hasOwn(RPC_REACH_DECISIONS, input.method)) {
       return yield* Effect.fail(
         callFailure("rpc_method_unavailable", `RPC method ${input.method} is not registered.`),
@@ -117,11 +123,11 @@ export const callWsRpc = <Client extends object>(
     }
 
     const decision = RPC_REACH_DECISIONS[input.method as WsRpcMethod];
-    if (decision.kind === "gap") {
+    if (decision.kind !== "call") {
       const detail =
         decision.reason === "streaming"
           ? "streaming RPCs need a subscription-shaped interface"
-          : "the server RPC has no declared authorization scope";
+          : decision.reason;
       return yield* Effect.fail(
         callFailure("rpc_reach_gap", `RPC method ${decision.method} is a gap: ${detail}.`),
       );
@@ -144,6 +150,7 @@ export const callWsRpc = <Client extends object>(
     );
     if (missingScope !== undefined) return yield* Effect.fail(rpcAuthorizationError(missingScope));
 
+    yield* readCaller().pipe(Effect.tap(assertLiveCaller));
     const candidate = (client as Record<string, unknown>)[decision.method];
     if (typeof candidate !== "function") {
       return yield* Effect.fail(
@@ -155,4 +162,4 @@ export const callWsRpc = <Client extends object>(
     }
     const invoke = candidate as UnaryRpcMethod;
     return yield* invoke(payload as never);
-  });
+});
