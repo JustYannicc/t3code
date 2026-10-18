@@ -7,7 +7,6 @@
  * Locks are keyed by `composerTargetKey` and live outside the draft store, so clearing a
  * draft never unlocks it. Only locked keys are kept, and they survive a reload.
  */
-import { useCallback, useMemo } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -64,14 +63,8 @@ export interface ComposerSendLock {
 export function useComposerSendLock(targetKey: string, answeringAgent: boolean): ComposerSendLock {
   const on = useComposerSendLockStore((state) => state.lockedTargetKeys[targetKey] === true);
   const locked = on && !answeringAgent;
-  const toggle = useCallback(
-    () => useComposerSendLockStore.getState().toggleSendLocked(targetKey),
-    [targetKey],
-  );
-  return useMemo(
-    () => ({ on, locked, disabledReason: locked ? SEND_LOCKED_REASON : null, toggle }),
-    [on, locked, toggle],
-  );
+  const toggle = () => useComposerSendLockStore.getState().toggleSendLocked(targetKey);
+  return { on, locked, disabledReason: locked ? SEND_LOCKED_REASON : null, toggle };
 }
 
 /** ChatView's `composer.toggleSendLock` shortcut. */
