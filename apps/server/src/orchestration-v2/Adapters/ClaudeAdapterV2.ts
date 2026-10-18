@@ -57,6 +57,7 @@ import {
   type ChatAttachment,
   ClaudeSettings,
   defaultInstanceIdForDriver,
+  isOrchestrationV2ProviderTurnTerminalStatus,
   type ModelSelection,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ExecutionNode,
@@ -1410,10 +1411,7 @@ const getNativeThreadId = Effect.fnUntraced(function* (
 const isSyntheticClaudeTurnId = (nativeTurnId: string): boolean => nativeTurnId.startsWith("turn:");
 
 const isTerminalProviderTurn = (turn: OrchestrationV2ProviderTurn): boolean =>
-  turn.status === "completed" ||
-  turn.status === "interrupted" ||
-  turn.status === "failed" ||
-  turn.status === "cancelled";
+  isOrchestrationV2ProviderTurnTerminalStatus(turn.status);
 
 const getNativeConversationHeadId = Effect.fnUntraced(function* (
   providerThread: OrchestrationV2ProviderThread,

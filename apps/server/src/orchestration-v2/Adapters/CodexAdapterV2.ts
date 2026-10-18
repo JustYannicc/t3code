@@ -27,6 +27,7 @@ import {
 import {
   CodexSettings,
   defaultInstanceIdForDriver,
+  isOrchestrationV2ProviderTurnTerminalStatus,
   isOrchestrationV2WorkActive,
   OrchestrationV2ProviderGoal,
   ProviderDriverKind,
@@ -882,11 +883,7 @@ function providerThreadFromCodexThread(input: {
 // Counts toward native rollback. `/goal` control turns never reach Codex and
 // carry no native ref, so they must not consume a native turn on revert.
 const isTerminalProviderTurn = (turn: OrchestrationV2ProviderTurn): boolean =>
-  turn.nativeTurnRef !== null &&
-  (turn.status === "completed" ||
-    turn.status === "interrupted" ||
-    turn.status === "failed" ||
-    turn.status === "cancelled");
+  turn.nativeTurnRef !== null && isOrchestrationV2ProviderTurnTerminalStatus(turn.status);
 
 export type CodexGoalCommand =
   | { readonly type: "show" }

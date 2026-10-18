@@ -1,6 +1,7 @@
 import { makeAssistantStreamingFilter } from "./assistantStreaming.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
+  isOrchestrationV2ProviderTurnTerminalStatus as isTerminalProviderTurnStatus,
   isOrchestrationV2WorkActive,
   CommandId,
   type EventId,
@@ -12,7 +13,6 @@ import {
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2ProviderFailure,
   type OrchestrationV2ProviderThread,
-  type OrchestrationV2ProviderTurn,
   type OrchestrationV2Run,
   type OrchestrationV2RunAttempt,
   type OrchestrationV2Subagent,
@@ -80,15 +80,6 @@ type ProviderTerminalEvent = Extract<
   ProviderAdapter.ProviderAdapterV2Event,
   { readonly type: "turn.terminal" }
 >;
-
-function isTerminalProviderTurnStatus(status: OrchestrationV2ProviderTurn["status"]): boolean {
-  return (
-    status === "completed" ||
-    status === "interrupted" ||
-    status === "failed" ||
-    status === "cancelled"
-  );
-}
 
 function isSettledSubagentStatus(status: OrchestrationV2Subagent["status"]): boolean {
   return !isOrchestrationV2WorkActive(status);

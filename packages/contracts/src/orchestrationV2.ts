@@ -963,6 +963,16 @@ export const OrchestrationV2ProviderTurnTokenUsage = Schema.Struct({
 export type OrchestrationV2ProviderTurnTokenUsage =
   typeof OrchestrationV2ProviderTurnTokenUsage.Type;
 
+export const OrchestrationV2ProviderTurnStatus = Schema.Literals([
+  "pending",
+  "running",
+  "completed",
+  "interrupted",
+  "failed",
+  "cancelled",
+]);
+export type OrchestrationV2ProviderTurnStatus = typeof OrchestrationV2ProviderTurnStatus.Type;
+
 export const OrchestrationV2ProviderTurn = Schema.Struct({
   id: ProviderTurnId,
   providerThreadId: ProviderThreadId,
@@ -970,14 +980,7 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
   runAttemptId: Schema.NullOr(RunAttemptId),
   nativeTurnRef: Schema.NullOr(OrchestrationV2ProviderRef),
   ordinal: PositiveInt,
-  status: Schema.Literals([
-    "pending",
-    "running",
-    "completed",
-    "interrupted",
-    "failed",
-    "cancelled",
-  ]),
+  status: OrchestrationV2ProviderTurnStatus,
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
   tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
@@ -1003,6 +1006,14 @@ export function latestProviderTurnForAttempt<
   return latest;
 }
 
+export const OrchestrationV2RuntimeRequestStatus = Schema.Literals([
+  "pending",
+  "resolved",
+  "expired",
+  "cancelled",
+]);
+export type OrchestrationV2RuntimeRequestStatus = typeof OrchestrationV2RuntimeRequestStatus.Type;
+
 export const OrchestrationV2RuntimeRequest = Schema.Struct({
   id: RuntimeRequestId,
   nodeId: NodeId,
@@ -1012,7 +1023,7 @@ export const OrchestrationV2RuntimeRequest = Schema.Struct({
     ProviderRequestKind,
     Schema.Literals(["dynamic_tool_call", "user_input", "auth_refresh"]),
   ]),
-  status: Schema.Literals(["pending", "resolved", "expired", "cancelled"]),
+  status: OrchestrationV2RuntimeRequestStatus,
   responseCapability: Schema.Union([
     Schema.Struct({ type: Schema.Literal("live"), providerSessionId: ProviderSessionId }),
     Schema.Struct({ type: Schema.Literal("message") }),

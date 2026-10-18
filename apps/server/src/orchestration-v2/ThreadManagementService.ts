@@ -11,6 +11,7 @@ import {
   type ChatAttachment,
   CommandId,
   MessageId,
+  isOrchestrationV2RunTerminalStatus,
   OrchestrationV2StopWorkflowError,
   type OrchestrationV2StopWorkflowInput,
   type ModelSelection,
@@ -21,6 +22,7 @@ import {
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2CreationSource,
   type OrchestrationV2Run,
+  type OrchestrationV2RunTerminalStatus,
   type OrchestrationV2ThreadShellSnapshot,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadTranscript,
@@ -113,10 +115,8 @@ export function existingThreadIdsForCommand(
   }
 }
 
-export type ThreadManagementTerminalRunStatus = Extract<
-  OrchestrationV2Run["status"],
-  "completed" | "failed" | "cancelled" | "interrupted" | "rolled_back"
->;
+export type ThreadManagementTerminalRunStatus = OrchestrationV2RunTerminalStatus;
+export const isTerminalRunStatus = isOrchestrationV2RunTerminalStatus;
 
 export interface ThreadManagementSendInput {
   readonly projectId: ProjectId;
@@ -447,18 +447,6 @@ export function isActiveRun(run: OrchestrationV2Run): boolean {
     run.status === "starting" ||
     run.status === "running" ||
     run.status === "waiting"
-  );
-}
-
-export function isTerminalRunStatus(
-  status: OrchestrationV2Run["status"],
-): status is ThreadManagementTerminalRunStatus {
-  return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "cancelled" ||
-    status === "interrupted" ||
-    status === "rolled_back"
   );
 }
 
