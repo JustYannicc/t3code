@@ -113,8 +113,9 @@ export function toggleComposerSendLockFromShortcut(
 
 /**
  * ChatView's last word on a send. It also catches sends that skip the composer's
- * disabled button and Enter handling, like sending a preview annotation. Call it after
- * pending questions are handled. Returns true when the send was held.
+ * disabled button and Enter handling, like sending a preview annotation. Check annotations
+ * before other send guards so queued edits retain them. Check text after pending questions
+ * are handled. Returns true when the send was held.
  */
 export function holdLockedComposerSend(
   target: ComposerThreadTarget,

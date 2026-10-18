@@ -5933,6 +5933,15 @@ export default function ChatView(props: ChatViewProps) {
   ) => {
     e?.preventDefault();
     if (
+      directAnnotation &&
+      holdLockedComposerSend(composerDraftTarget, {
+        annotation: directAnnotation,
+        answeringPlan: false,
+      })
+    ) {
+      return;
+    }
+    if (
       usageLimitsOffered &&
       usageLimitsKey !== null &&
       !directAnnotation &&
