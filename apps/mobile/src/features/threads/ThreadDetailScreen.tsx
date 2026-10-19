@@ -1211,6 +1211,7 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
                       <Notice
                         message={props.threadSyncError}
                         icon="exclamationmark.circle"
+                        tone="danger"
                         iconTone="danger"
                         floating
                       />
