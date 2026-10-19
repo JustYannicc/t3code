@@ -4,8 +4,6 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
-import { resolveEarlyMacKeychainName } from "./DesktopEarlyElectronStartup.ts";
-
 export class DesktopUserDataInitializationError extends Schema.TaggedError<DesktopUserDataInitializationError>()(
   "DesktopUserDataInitializationError",
   {
@@ -40,18 +38,13 @@ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPa
     readonly platform: NodeJS.Platform;
     readonly isPackaged: boolean;
     readonly dirname: string;
+    readonly localMacKeychainName?: string | undefined;
   }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const localMacKeychainName = resolveEarlyMacKeychainName({
-      platform: input.platform,
-      isPackaged: input.isPackaged,
-      runtimeDirectory: input.dirname,
-      isDevelopment: input.isDevelopment,
-    });
-    if (localMacKeychainName !== null) {
+    if (input.localMacKeychainName !== undefined) {
       // Chromium cookies must use the same runtime boundary as their Keychain key.
-      return path.join(input.appDataDirectory, "local-keychains", localMacKeychainName);
+      return path.join(input.appDataDirectory, "local-keychains", input.localMacKeychainName);
     }
     const names = input.isDevelopment
       ? { current: "t3code-dev", legacy: "T3 Code (Dev)" }

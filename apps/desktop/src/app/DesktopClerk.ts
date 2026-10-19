@@ -19,7 +19,6 @@ import { clerkFrontendApiHostnameFromPublishableKey } from "@t3tools/shared/rela
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import { resolveEarlyMacKeychainName } from "./DesktopEarlyElectronStartup.ts";
 import * as DesktopUserData from "./DesktopUserData.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopWebLinks from "./DesktopWebLinks.ts";
@@ -103,21 +102,16 @@ export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const shell = yield* ElectronShell.ElectronShell;
   const path = yield* Path.Path;
-  const localMacKeychainName = resolveEarlyMacKeychainName({
-    platform: environment.platform,
-    isPackaged: environment.isPackaged,
-    runtimeDirectory: environment.dirname,
-    isDevelopment: environment.isDevelopment,
-  });
+  const localMacKeychainName = environment.localMacKeychainName;
   const tokenDirectory =
-    localMacKeychainName === null
+    localMacKeychainName === undefined
       ? environment.stateDir
       : path.join(environment.stateDir, "local-keychains", localMacKeychainName);
 
   // Must not yield: the bridge registers a scheme Electron rejects once ready.
   const userDataPath = yield* DesktopUserData.resolveUserDataPath(environment);
   yield* electronApp.setPath("userData", userDataPath);
-  if (localMacKeychainName !== null) {
+  if (localMacKeychainName !== undefined) {
     yield* electronApp.setPath("sessionData", userDataPath);
   }
 

@@ -25,7 +25,6 @@ import * as Schema from "effect/Schema";
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import { resolveEarlyMacKeychainName } from "./DesktopEarlyElectronStartup.ts";
 
 const EncryptedConnectionCatalogDocument = Schema.Struct({
   version: Schema.Literal(1),
@@ -385,14 +384,9 @@ export const make = Effect.gen(function* () {
   const safeStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
   const crypto = yield* Crypto.Crypto;
   const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
-  const localMacKeychainName = resolveEarlyMacKeychainName({
-    platform: environment.platform,
-    isPackaged: environment.isPackaged,
-    runtimeDirectory: environment.dirname,
-    isDevelopment: environment.isDevelopment,
-  });
+  const localMacKeychainName = environment.localMacKeychainName;
   const catalogPath =
-    localMacKeychainName === null
+    localMacKeychainName === undefined
       ? path.join(environment.stateDir, "connection-catalog.json")
       : path.join(
           environment.stateDir,
@@ -447,7 +441,7 @@ export const make = Effect.gen(function* () {
 
   const migrateLegacyCatalog = Effect.gen(function* () {
     // Shared legacy credentials belong to the old key, not this runtime's isolated key.
-    if (localMacKeychainName !== null) return Option.none<string>();
+    if (localMacKeychainName !== undefined) return Option.none<string>();
     const records = yield* savedEnvironments.getRegistry.pipe(
       Effect.mapError(
         (cause) =>
