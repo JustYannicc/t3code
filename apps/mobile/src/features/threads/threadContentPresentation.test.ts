@@ -54,4 +54,44 @@ describe("thread content presentation", () => {
       detail: "The thread stream failed.",
     });
   });
+
+  it("keeps a pending creation's prompt visible before its thread exists", () => {
+    expect(
+      projectThreadContentPresentation({
+        hasDetail: false,
+        detailError: null,
+        detailDeleted: true,
+        connectionState: "connected",
+        hasPendingCreation: true,
+      }),
+    ).toEqual({ kind: "ready" });
+  });
+
+  it("surfaces a synchronization failure while creation is still pending", () => {
+    expect(
+      projectThreadContentPresentation({
+        hasDetail: false,
+        detailError: "Message synchronization timed out.",
+        detailDeleted: false,
+        connectionState: "connected",
+        hasPendingCreation: true,
+      }),
+    ).toEqual({
+      kind: "unavailable",
+      title: "Could not load conversation",
+      detail: "Message synchronization timed out.",
+    });
+  });
+
+  it("keeps cached messages visible after a synchronization failure during creation", () => {
+    expect(
+      projectThreadContentPresentation({
+        hasDetail: true,
+        detailError: "Message synchronization timed out.",
+        detailDeleted: false,
+        connectionState: "connected",
+        hasPendingCreation: true,
+      }),
+    ).toEqual({ kind: "ready" });
+  });
 });

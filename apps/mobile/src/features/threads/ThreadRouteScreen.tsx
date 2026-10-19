@@ -865,20 +865,14 @@ function ThreadRouteContent(
     return <OpeningThreadLoadingScreen />;
   }
 
-  // A queued creation renders as ready content: its prompt is the whole
-  // conversation until the server creates the thread. The subscription's
-  // not-found error for that window is expected, not a load failure.
-  const threadDetailError =
-    creationState === null ? Option.getOrNull(selectedThreadDetailState.error) : null;
-  const contentPresentation =
-    creationState !== null
-      ? { kind: "ready" as const }
-      : projectThreadContentPresentation({
-          hasDetail: selectedThreadDetail !== null,
-          detailError: threadDetailError,
-          detailDeleted: selectedThreadDetailState.status === "deleted",
-          connectionState: routeConnectionState,
-        });
+  const threadDetailError = Option.getOrNull(selectedThreadDetailState.error);
+  const contentPresentation = projectThreadContentPresentation({
+    hasDetail: selectedThreadDetail !== null,
+    detailError: threadDetailError,
+    detailDeleted: selectedThreadDetailState.status === "deleted",
+    connectionState: routeConnectionState,
+    hasPendingCreation: creationState !== null,
+  });
   const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
   const renderThreadRouteBody = () => (
     <>
