@@ -153,7 +153,7 @@ describe("DesktopConnectionCatalogStore", () => {
               runtimeDirectory: dirname,
             });
             assert.isString(name);
-            const profile = path.join(environment.appDataDirectory, "local-keychains", name!);
+            const profile = path.join(environment.appDataDirectory, name!);
             const tokens = path.join(stateDir, "local-keychains", name!);
             const legacyProfile = path.join(
               environment.appDataDirectory,

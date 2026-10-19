@@ -65,8 +65,6 @@ const layerDesktopClerk = (
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
     platform,
-    isPackaged: true,
-    dirname: "/app",
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
   const electronApp = {

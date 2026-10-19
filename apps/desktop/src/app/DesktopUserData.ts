@@ -36,15 +36,13 @@ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPa
     readonly appDataDirectory: string;
     readonly isDevelopment: boolean;
     readonly platform: NodeJS.Platform;
-    readonly isPackaged: boolean;
-    readonly dirname: string;
     readonly localMacKeychainName?: string | undefined;
   }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     if (input.localMacKeychainName !== undefined) {
       // Chromium cookies must use the same runtime boundary as their Keychain key.
-      return path.join(input.appDataDirectory, "local-keychains", input.localMacKeychainName);
+      return path.join(input.appDataDirectory, input.localMacKeychainName);
     }
     const names = input.isDevelopment
       ? { current: "t3code-dev", legacy: "T3 Code (Dev)" }
