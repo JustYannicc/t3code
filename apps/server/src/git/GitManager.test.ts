@@ -84,7 +84,6 @@ interface FakeGhScenario {
   prListGate?: {
     readonly started: Deferred.Deferred<void>;
     readonly release: Deferred.Deferred<void>;
-    readonly returned: Deferred.Deferred<void>;
   };
   prListByHeadSelector?: Record<string, string>;
   prListSequenceByHeadSelector?: Record<string, string[]>;
@@ -457,7 +456,6 @@ function createGitHubProviderWithFakeGh(scenario: FakeGhScenario = {}): {
       if (scenario.prListGate) {
         return Deferred.succeed(scenario.prListGate.started, undefined).pipe(
           Effect.andThen(Deferred.await(scenario.prListGate.release)),
-          Effect.andThen(Deferred.succeed(scenario.prListGate.returned, undefined)),
           Effect.as(output),
         );
       }
@@ -991,163 +989,107 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
-  it.effect("refresh status returns local git state while gh PR lookup is held", () =>
-    Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-refresh-status-gh-gate-");
-      yield* initRepo(repoDir);
-      yield* runGit(repoDir, ["checkout", "-b", "feature/delayed-status"]);
-      const remoteDir = yield* createBareRemote();
-      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "feature/delayed-status"]);
-
-      const prListGate = {
-        started: yield* Deferred.make<void>(),
-        release: yield* Deferred.make<void>(),
-        returned: yield* Deferred.make<void>(),
-      };
-      const branchRechecked = yield* Deferred.make<string>();
-      const branchCached = yield* Deferred.make<string>();
-      const localPublishedBeforeRemote = yield* Deferred.make<void>();
-      const cacheWatcherReady = yield* Deferred.make<void>();
-      let remoteStatusReturned = false;
-      let refreshCompleted = false;
-      const { manager, ghCalls } = yield* makeManager({
-        ghScenario: {
-          prListGate,
-          prListSequence: [
-            JSON.stringify([
-              {
-                number: 613,
-                title: "Delayed status PR",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/613",
-                baseRefName: "main",
-                headRefName: "feature/delayed-status",
-              },
-            ]),
-          ],
-        },
-      });
-      const trackedManager: GitManager.GitManager["Service"] = {
-        ...manager,
-        localStatus: (input) =>
-          manager
-            .localStatus(input)
-            .pipe(
-              Effect.tap((local) =>
-                remoteStatusReturned
-                  ? Deferred.succeed(branchRechecked, local.refName ?? "")
-                  : Effect.void,
+  it.effect(
+    "publishes local Git changes during a held PR lookup without caching its old branch",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-refresh-status-gh-gate-");
+        yield* initRepo(repoDir);
+        yield* runGit(repoDir, ["checkout", "-b", "release"]);
+        const remoteDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "release"]);
+        yield* runGit(repoDir, ["tag", "release"]);
+        const oldPr = {
+          number: 613,
+          title: "Release PR",
+          url: "https://github.com/pingdotgg/codething-mvp/pull/613",
+          baseRefName: "main",
+          headRefName: "release",
+        };
+        const newPr = { ...oldPr, number: 614, headRefName: "heads/release" };
+        const ghScenario: FakeGhScenario = {
+          prListSequence: [oldPr, oldPr, newPr].map((pr) => JSON.stringify([pr])),
+        };
+        const { manager } = yield* makeManager({ ghScenario });
+        const context = yield* Layer.build(
+          VcsStatusBroadcaster.layer.pipe(
+            Layer.provide(
+              GitWorkflowService.layer.pipe(
+                Layer.provide(Layer.succeed(GitManager.GitManager, manager)),
+                Layer.provide(
+                  VcsDriverRegistry.layer.pipe(
+                    Layer.provide(VcsProjectConfig.layer),
+                    Layer.provide(VcsProcess.layer),
+                  ),
+                ),
               ),
             ),
-        remoteStatus: (input, options) =>
-          manager.remoteStatus(input, options).pipe(
-            Effect.tap((remote) =>
-              Effect.sync(() => {
-                remoteStatusReturned = remote?.pr !== null && remote?.pr !== undefined;
+            Layer.provide(
+              Layer.mock(BackgroundPolicy.BackgroundPolicy)({
+                hasDemand: () => Effect.succeed(true),
+                shouldRunScopeWork: () => Effect.succeed(true),
               }),
             ),
           ),
-      };
-      const workflowContext = yield* Layer.build(
-        GitWorkflowService.layer.pipe(
-          Layer.provide(Layer.succeed(GitManager.GitManager, trackedManager)),
-          Layer.provide(
-            VcsDriverRegistry.layer.pipe(
-              Layer.provide(VcsProjectConfig.layer),
-              Layer.provide(VcsProcess.layer),
-            ),
-          ),
-        ),
-      );
-      const broadcasterContext = yield* Layer.build(
-        VcsStatusBroadcaster.layer.pipe(
-          Layer.provide(
-            Layer.succeed(
-              GitWorkflowService.GitWorkflowService,
-              Context.get(workflowContext, GitWorkflowService.GitWorkflowService),
-            ),
-          ),
-          Layer.provide(
-            Layer.mock(BackgroundPolicy.BackgroundPolicy)({
-              hasDemand: () => Effect.succeed(true),
-              shouldRunScopeWork: () => Effect.succeed(true),
-            }),
-          ),
-        ),
-      );
-      const broadcaster = Context.get(
-        broadcasterContext,
-        VcsStatusBroadcaster.VcsStatusBroadcaster,
-      );
-      const cacheWatcher = yield* broadcaster
-        .streamStatus({ cwd: repoDir, includeRemote: false })
-        .pipe(
-          Stream.tap((event) => {
-            if (event._tag === "snapshot") {
-              return Deferred.succeed(cacheWatcherReady, undefined).pipe(Effect.asVoid);
-            }
-            if (event._tag === "localUpdated" && event.local.refName === "feature/next-status") {
-              return Deferred.succeed(branchCached, event.local.refName ?? "").pipe(Effect.asVoid);
-            }
+        );
+        const broadcaster = Context.get(context, VcsStatusBroadcaster.VcsStatusBroadcaster);
+        const initial = yield* broadcaster.getStatus({ cwd: repoDir });
+        expect(initial.refName).toBe("release");
+        expect(initial.pr?.number).toBe(613);
+
+        const subscribed = yield* Deferred.make<void>();
+        const published = yield* Deferred.make<void>();
+        yield* broadcaster.streamStatus({ cwd: repoDir, includeRemote: false }).pipe(
+          Stream.runForEach((event) => {
+            if (event._tag === "snapshot") return Deferred.succeed(subscribed, undefined);
             if (event._tag === "localUpdated" && event.local.hasWorkingTreeChanges) {
-              return Deferred.succeed(localPublishedBeforeRemote, undefined).pipe(Effect.asVoid);
+              return Deferred.succeed(published, undefined);
             }
             return Effect.void;
           }),
-          Stream.drop(1),
-          Stream.filter(
-            (event) =>
-              event._tag === "localUpdated" && event.local.refName === "feature/next-status",
-          ),
-          Stream.runHead,
           Effect.forkScoped,
         );
-      yield* Deferred.await(cacheWatcherReady);
+        yield* Deferred.await(subscribed);
+        const gate = {
+          started: yield* Deferred.make<void>(),
+          release: yield* Deferred.make<void>(),
+        };
+        ghScenario.prListGate = gate;
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.writeFileString(NodePath.join(repoDir, "README.md"), "changed before refresh\n");
+        const completed = yield* Deferred.make<void>();
+        const refresh = yield* broadcaster
+          .refreshStatus(repoDir)
+          .pipe(Effect.ensuring(Deferred.succeed(completed, undefined)), Effect.forkScoped);
+        yield* Deferred.await(gate.started);
+        const pending = Option.getOrThrow(
+          yield* Stream.runHead(broadcaster.streamStatus({ cwd: repoDir, includeRemote: false })),
+        );
+        expect(pending._tag).toBe("snapshot");
+        if (pending._tag === "snapshot") expect(pending.local.hasWorkingTreeChanges).toBe(true);
+        yield* Deferred.await(published);
+        expect(yield* Deferred.isDone(completed)).toBe(false);
 
-      const fs = yield* FileSystem.FileSystem;
-      yield* fs.writeFileString(NodePath.join(repoDir, "README.md"), "changed before refresh\n");
-      const refresh = yield* broadcaster.refreshStatus(repoDir).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            refreshCompleted = true;
-          }),
-        ),
-        Effect.forkScoped,
-      );
-      yield* Deferred.await(localPublishedBeforeRemote);
-      expect(refreshCompleted).toBe(false);
-      yield* Deferred.await(prListGate.started);
-      expect(refreshCompleted).toBe(false);
-      expect(ghCalls.some((call) => call.startsWith("pr list "))).toBe(true);
+        yield* runGit(repoDir, ["checkout", "-b", "heads/release"]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "refs/heads/heads/release"]);
+        yield* Deferred.succeed(gate.release, undefined);
+        const refreshed = yield* Fiber.join(refresh);
+        expect(refreshed.refName).toBe("heads/release");
+        expect(refreshed.hasWorkingTreeChanges).toBe(true);
+        expect(refreshed.pr).toBeNull();
+        const snapshot = Option.getOrThrow(
+          yield* Stream.runHead(broadcaster.streamStatus({ cwd: repoDir, includeRemote: false })),
+        );
+        expect(snapshot._tag).toBe("snapshot");
+        if (snapshot._tag === "snapshot") expect(snapshot.remote).toBeNull();
 
-      yield* runGit(repoDir, ["checkout", "-b", "feature/next-status"]);
-      const currentBranch = yield* runGit(repoDir, ["branch", "--show-current"]);
-      expect(currentBranch.stdout.trim()).toBe("feature/next-status");
-      yield* Deferred.succeed(prListGate.release, undefined);
-      yield* Deferred.await(prListGate.returned);
-      const refreshed = yield* Fiber.join(refresh);
-      expect(refreshCompleted).toBe(true);
-      expect(refreshed.refName).toBe("feature/next-status");
-      expect(refreshed.pr).toBeNull();
-      expect(yield* Deferred.await(branchRechecked)).toBe("feature/next-status");
-      expect(yield* Deferred.await(branchCached)).toBe("feature/next-status");
-      expect(Option.isSome(yield* Fiber.join(cacheWatcher))).toBe(true);
-
-      const coldStatus = yield* broadcaster.getStatus({ cwd: repoDir });
-      expect(coldStatus.refName).toBe("feature/next-status");
-      expect(coldStatus.pr).toBeNull();
-
-      const snapshot = yield* Stream.runHead(
-        broadcaster.streamStatus({ cwd: repoDir, includeRemote: false }),
-      );
-      expect(Option.isSome(snapshot)).toBe(true);
-      const event = Option.getOrThrow(snapshot);
-      expect(event._tag).toBe("snapshot");
-      if (event._tag !== "snapshot") return;
-      expect(event.local.refName).toBe("feature/next-status");
-      expect(event.remote?.hasUpstream).toBe(false);
-      expect(event.remote?.pr).toBeNull();
-    }),
+        delete ghScenario.prListGate;
+        const recovered = yield* broadcaster.getStatus({ cwd: repoDir });
+        expect(recovered.refName).toBe("heads/release");
+        expect(recovered.pr?.number).toBe(614);
+        expect((yield* broadcaster.getStatus({ cwd: repoDir })).pr?.number).toBe(614);
+      }),
   );
 
   it.effect("status includes draft PR metadata when branch already has a draft PR", () =>

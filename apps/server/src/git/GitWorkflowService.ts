@@ -338,41 +338,32 @@ export const make = Effect.gen(function* () {
             : Effect.succeed(nonRepositoryLocalStatus()),
         ),
       ),
-    currentBranch: (cwd) =>
-      detectGitRepositoryForStatus("GitWorkflowService.currentBranch", cwd).pipe(
-        Effect.flatMap((isGitRepository) => {
-          if (!isGitRepository) return Effect.succeed(null);
-          return git
-            .execute({
-              operation: "GitWorkflowService.currentBranch",
-              cwd,
-              args: ["symbolic-ref", "--quiet", "HEAD"],
-              allowNonZeroExit: true,
-              timeoutMs: 5_000,
-            })
-            .pipe(
-              Effect.flatMap((result) => {
-                if (result.exitCode === 0) {
-                  const branch = result.stdout.trim().replace(/^refs\/heads\//, "");
-                  return Effect.succeed(branch.length > 0 ? branch : null);
-                }
-                if (result.exitCode === 1) return Effect.succeed(null);
-                return Effect.fail(
-                  new GitCommandError({
-                    operation: "GitWorkflowService.currentBranch",
-                    command: "git symbolic-ref",
-                    cwd,
-                    argumentCount: 3,
-                    ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
-                    stdoutLength: result.stdout.length,
-                    stderrLength: result.stderr.length,
-                    detail: "Failed to read the checked-out branch.",
-                  }),
-                );
-              }),
-            );
-        }),
-      ),
+    currentBranch: Effect.fn("GitWorkflowService.currentBranch")(function* (cwd) {
+      if (!(yield* detectGitRepositoryForStatus("GitWorkflowService.currentBranch", cwd))) {
+        return null;
+      }
+      const result = yield* git.execute({
+        operation: "GitWorkflowService.currentBranch",
+        cwd,
+        args: ["symbolic-ref", "--quiet", "HEAD"],
+        allowNonZeroExit: true,
+        timeoutMs: 5_000,
+      });
+      if (result.exitCode === 0) {
+        return result.stdout.trim().replace(/^refs\/heads\//, "") || null;
+      }
+      if (result.exitCode === 1) return null;
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.currentBranch",
+        command: "git symbolic-ref",
+        cwd,
+        argumentCount: 3,
+        ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
+        stdoutLength: result.stdout.length,
+        stderrLength: result.stderr.length,
+        detail: "Failed to read the checked-out branch.",
+      });
+    }),
     remoteStatus: (input, options) =>
       detectGitRepositoryForStatus("GitWorkflowService.remoteStatus", input.cwd).pipe(
         Effect.flatMap((isGitRepository) =>
