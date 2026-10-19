@@ -382,6 +382,7 @@ import {
   useEnvironmentSupportsServerBrowser,
   useProject,
   useProjects,
+  useThreadError,
   useThreadProjection,
   useThreadStatus,
   useThreadHistory,
@@ -1146,8 +1147,10 @@ export default function ChatView(props: ChatViewProps) {
     ? deriveReportedModelSelection(serverProjection)
     : null;
   const threadStatus = useThreadStatus(routeThreadDetailRef);
+  const threadDetailError = useThreadError(routeThreadDetailRef);
   const threadSyncPhase = resolveThreadSyncPhase({
     detailExists: serverProjection !== null,
+    detailError: threadDetailError,
     shellExists: serverThread !== null,
     status: threadStatus,
   });
@@ -1529,7 +1532,7 @@ export default function ChatView(props: ChatViewProps) {
           title: parentSubagentThread?.title ?? "Parent thread",
         };
   const threadError = isServerThread
-    ? (localServerError ?? serverRuntime?.lastError ?? null)
+    ? (localServerError ?? threadDetailError ?? serverRuntime?.lastError ?? null)
     : localDraftError;
   const threadErrorBannerKey = getThreadErrorBannerKey(routeThreadKey, threadError);
   const visibleThreadError = shouldShowThreadErrorBanner(
