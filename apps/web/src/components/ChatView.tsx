@@ -1532,7 +1532,7 @@ export default function ChatView(props: ChatViewProps) {
           title: parentSubagentThread?.title ?? "Parent thread",
         };
   const threadError = isServerThread
-    ? (localServerError ?? threadDetailError ?? serverRuntime?.lastError ?? null)
+    ? (threadDetailError ?? localServerError ?? serverRuntime?.lastError ?? null)
     : localDraftError;
   const threadErrorBannerKey = getThreadErrorBannerKey(routeThreadKey, threadError);
   const visibleThreadError = shouldShowThreadErrorBanner(
