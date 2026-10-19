@@ -485,6 +485,7 @@ export const make = Effect.gen(function* () {
     remote: VcsStatusRemoteResult | null,
     policyCwds: ReadonlyArray<string>,
   ) {
+    let pullAttempted = false;
     return yield* Effect.gen(function* () {
       const autoPullEnabled = (yield* Effect.forEach(policyCwds, autoPullPolicy.isEnabled, {
         concurrency: "unbounded",
@@ -503,6 +504,7 @@ export const make = Effect.gen(function* () {
       const local = yield* workflow.localStatus({ cwd });
       if (!local.isRepo || !local.isDefaultRef || local.hasWorkingTreeChanges) return null;
 
+      pullAttempted = true;
       yield* workflow.pullCurrentBranch(cwd);
       yield* workflow.invalidateStatus(cwd);
       const branchBefore = yield* workflow.currentBranch(cwd);
@@ -517,8 +519,20 @@ export const make = Effect.gen(function* () {
       yield* updateCachedRemoteStatus(cwd, refreshedRemote, branch, { publish: true });
       return { local: refreshedLocal, remote: refreshedRemote };
     }).pipe(
-      Effect.catch(() =>
-        Effect.logWarning("Automatic project pull failed", { cwd }).pipe(Effect.as(null)),
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          yield* Effect.logWarning("Automatic project pull failed", {
+            cwdLength: cwd.length,
+            errorTag: error._tag,
+          });
+          if (!pullAttempted) return null;
+          // A pull or its follow-up reads can fail after local state has changed.
+          // Let a failed reconciliation reach the caller instead of publishing old status.
+          yield* workflow.invalidateLocalStatus(cwd);
+          const local = yield* workflow.localStatus({ cwd });
+          yield* updateCachedStatus(cwd, local, remote, { publish: true });
+          return { local, remote };
+        }),
       ),
     );
   });
