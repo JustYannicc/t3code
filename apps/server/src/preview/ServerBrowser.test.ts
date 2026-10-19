@@ -212,7 +212,6 @@ const desktopRenders = (tabId: string) => {
   }
   return desktopTabs.has(tabId);
 };
-/** Desktop tabs a panel shows. */
 const desktopVisibleTabs = new Set<string>();
 const releasedDesktopTabs: Array<string> = [];
 const desktopConnections: Array<{ endpoint: string; context: ReturnType<typeof makeContext> }> = [];
@@ -1388,7 +1387,7 @@ it.live("control updates replace a stalled viewer backlog in the order they happ
   ).pipe(Effect.provide(layer)),
 );
 
-it.live("an agent's tabs stop at the limit until an unwatched idle tab closes", () =>
+it.live("idle cleanup frees capacity while retaining streamed and natively shown agent tabs", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const { broker, tabId } = yield* ready;
@@ -1397,7 +1396,12 @@ it.live("an agent's tabs stop at the limit until an unwatched idle tab closes", 
         operation: "open",
         input: { reuseExistingTab: false, show: false },
       });
-      for (let count = 1; count < 8; count += 1) yield* open;
+      desktopRendersNext = true;
+      const nativeShown = yield* open;
+      desktopVisibleTabs.add(nativeShown.tabId!);
+      desktopRendersNext = true;
+      yield* open;
+      for (let count = 3; count < 8; count += 1) yield* open;
       expect(yield* Effect.flip(open)).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "tabLimit",
@@ -1416,7 +1420,7 @@ it.live("an agent's tabs stop at the limit until an unwatched idle tab closes", 
       const manager = yield* Manager.PreviewManager;
       const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
       expect(sessions.map((session) => session.tabId).toSorted()).toEqual(
-        [tabId, reopened.tabId].toSorted(),
+        [tabId, nativeShown.tabId, reopened.tabId].toSorted(),
       );
     }),
   ).pipe(Effect.provide(layer)),
@@ -1592,9 +1596,10 @@ it.live("desktop file pickers stay native outside agent actions and remote contr
   ).pipe(Effect.provide(layer)),
 );
 
-it.live("a desktop tab is visible while a desktop panel shows it", () =>
+it.live("prefers the shown native tab and keeps stream visibility independent of its panel", () =>
   Effect.scoped(
     Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
       const broker = yield* Broker.PreviewAutomationBroker;
       const manager = yield* Manager.PreviewManager;
       yield* Effect.yieldNow;
@@ -1606,12 +1611,48 @@ it.live("a desktop tab is visible while a desktop panel shows it", () =>
         input: {},
         tabId: PreviewTabId.make(opened.tabId),
       });
-      // The desktop draws the page itself, so no viewer ever streams it.
       expect(yield* status).toMatchObject({ visible: false });
+      const later = (yield* Clock.currentTimeMillis) + 1;
+      const clock = vi.spyOn(Date, "now").mockReturnValue(later);
+      yield* Effect.addFinalizer(() => Effect.sync(() => clock.mockRestore()));
+      desktopRendersNext = true;
+      const background = yield* manager.open({
+        threadId: scope.thread.threadId,
+        runtime: "server",
+      });
+      yield* broker.invoke({
+        scope,
+        operation: "status",
+        input: {},
+        tabId: PreviewTabId.make(background.tabId),
+      });
+
       desktopVisibleTabs.add(opened.tabId);
-      const shown = yield* status;
-      expect(shown).toMatchObject({ visible: true });
-      expect(shown.tabs).toEqual([expect.objectContaining({ tabId: opened.tabId, visible: true })]);
+      const shown = yield* broker.invoke<PreviewAutomationStatus>({
+        scope: asSession("new-agent"),
+        operation: "status",
+        input: {},
+      });
+      expect(shown).toMatchObject({ tabId: opened.tabId, visible: true });
+      expect(shown.tabs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ tabId: opened.tabId, visible: true }),
+          expect.objectContaining({ tabId: background.tabId, visible: false }),
+        ]),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* browser.attachViewer(viewerInput(opened.tabId, false));
+          desktopVisibleTabs.delete(opened.tabId);
+          expect(yield* status).toMatchObject({ visible: true });
+        }),
+      );
+      const hidden = yield* status;
+      expect(hidden).toMatchObject({ visible: false });
+      expect(hidden.tabs).toEqual(
+        expect.arrayContaining([expect.objectContaining({ tabId: opened.tabId, visible: false })]),
+      );
     }),
   ).pipe(Effect.provide(layer)),
 );
