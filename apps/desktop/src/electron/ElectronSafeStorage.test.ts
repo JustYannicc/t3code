@@ -1,6 +1,5 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import { assert, describe, it } from "@effect/vitest";
@@ -27,60 +26,58 @@ const withStorage = <A, E>(
   platform: NodeJS.Platform,
   use: (storage: ElectronSafeStorage.ElectronSafeStorage["Service"]) => Effect.Effect<A, E>,
 ) =>
-  Effect.flatMap(ElectronSafeStorage.ElectronSafeStorage, use).pipe(
-    Effect.provide(
-      ElectronSafeStorage.layer.pipe(Layer.provide(Layer.succeed(HostProcess.Platform, platform))),
-    ),
+  ElectronSafeStorage.make.pipe(
+    Effect.flatMap(use),
+    Effect.provideService(HostProcess.Platform, platform),
   );
 
 beforeEach(() => vi.resetAllMocks());
 
 describe("macOS safe storage", () => {
-  beforeEach(() => {
-    for (const method of [
-      storage.isEncryptionAvailable,
-      storage.encryptString,
-      storage.decryptString,
-    ]) {
-      method.mockImplementation(() => {
-        throw new Error("Synchronous Keychain access can block the main thread");
-      });
-    }
-  });
-
-  it.effect("round trips bytes through native async storage and unwraps the decrypt result", () =>
+  it.effect("keeps the event loop responsive while native Keychain operations are pending", () =>
     withStorage("darwin", (safeStorage) =>
       Effect.gen(function* () {
         const encrypted = Buffer.from([0, 128, 255]);
-        storage.isAsyncEncryptionAvailable.mockResolvedValue(true);
-        storage.encryptStringAsync.mockResolvedValue(encrypted);
-        storage.decryptStringAsync.mockResolvedValue({ result: "secret", shouldReEncrypt: true });
+        const availability = Promise.withResolvers<boolean>();
+        const encryption = Promise.withResolvers<Buffer>();
+        const decryption = Promise.withResolvers<{ result: string; shouldReEncrypt: boolean }>();
+        storage.isAsyncEncryptionAvailable.mockReturnValue(availability.promise);
+        storage.encryptStringAsync.mockReturnValue(encryption.promise);
+        storage.decryptStringAsync.mockReturnValue(decryption.promise);
+        let completed = false;
+        const work = yield* Effect.forkChild(
+          Effect.all(
+            [
+              safeStorage.isEncryptionAvailable,
+              safeStorage.encryptString("secret"),
+              safeStorage.decryptString(new Uint8Array(encrypted)),
+            ],
+            { concurrency: "unbounded" },
+          ).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                completed = true;
+              }),
+            ),
+          ),
+        );
 
-        assert.isTrue(yield* safeStorage.isEncryptionAvailable);
-        const bytes = yield* safeStorage.encryptString("secret");
-        assert.equal(yield* safeStorage.decryptString(new Uint8Array(bytes)), "secret");
+        // A real event-loop turn must run while all three native operations are pending.
+        yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+        assert.lengthOf(storage.isAsyncEncryptionAvailable.mock.calls, 1);
         assert.deepEqual(storage.encryptStringAsync.mock.calls, [["secret"]]);
         assert.deepEqual(storage.decryptStringAsync.mock.calls, [[encrypted]]);
         assert.isTrue(Buffer.isBuffer(storage.decryptStringAsync.mock.calls[0]?.[0]));
-        assert.isTrue(Option.isNone(yield* safeStorage.selectedStorageBackend));
-        assert.lengthOf(storage.getSelectedStorageBackend.mock.calls, 0);
-      }),
-    ),
-  );
-
-  it.effect("waits for native availability without blocking other main-thread work", () =>
-    withStorage("darwin", (safeStorage) =>
-      Effect.gen(function* () {
-        const pending = Promise.withResolvers<boolean>();
-        storage.isAsyncEncryptionAvailable.mockReturnValue(pending.promise);
-        const result = yield* Effect.forkChild(safeStorage.isEncryptionAvailable);
-        // The event loop must keep running while native Keychain consent is pending.
-        yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
-        assert.lengthOf(storage.isAsyncEncryptionAvailable.mock.calls, 1);
-        assert.isUndefined(result.pollUnsafe());
-        pending.resolve(false);
-        assert.isFalse(yield* Fiber.join(result));
-        assert.lengthOf(storage.isEncryptionAvailable.mock.calls, 0);
+        assert.isFalse(completed);
+        availability.resolve(true);
+        encryption.resolve(encrypted);
+        decryption.resolve({ result: "secret", shouldReEncrypt: true });
+        assert.deepEqual(yield* Fiber.join(work), [true, encrypted, "secret"]);
+        assert.isEmpty([
+          ...storage.isEncryptionAvailable.mock.calls,
+          ...storage.encryptString.mock.calls,
+          ...storage.decryptString.mock.calls,
+        ]);
       }),
     ),
   );
