@@ -83,10 +83,9 @@ export const make = Effect.gen(function* () {
   }>(16);
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const tabs = new Map<string, AttachedTab>();
-  /** Server tabs a panel shows, attached or not, so an attach can announce it. */
+  // Preserve panel visibility while its guest is detached or still attaching.
   const visibleTabs = new Set<string>();
   const emit = (event: DesktopBrowserEventType) => runFork(PubSub.publish(outbox, event));
-  /** What a backend hears when a tab attaches: the tab, then whether a panel shows it. */
   const announcement = (key: DesktopBrowserTabKey): ReadonlyArray<DesktopBrowserEventType> =>
     visibleTabs.has(keyOf(key))
       ? [

@@ -495,7 +495,6 @@ const make = Effect.gen(function* () {
     },
   });
 
-  /** Whether a person sees the tab: a viewer streams it, or a desktop panel shows its page. */
   const seen = (tab: ServerTab) =>
     tab.viewers.size > 0 ||
     (tab.desktop !== null &&

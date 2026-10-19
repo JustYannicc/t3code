@@ -2378,7 +2378,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     yield* applyColorScheme(tabId, wc, colorScheme);
   });
 
-  /** Only a server tab reports this; its server says whether a person sees it. */
   const setVisible = Effect.fn("PreviewManager.setVisible")(function* (
     tabId: string,
     visible: boolean,

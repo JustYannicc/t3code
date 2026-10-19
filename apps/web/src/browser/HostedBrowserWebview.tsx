@@ -208,10 +208,8 @@ export function HostedBrowserWebview(props: {
   ]);
 
   const active = presentation.visible && presentation.rect !== null;
-  // The server tells agents whether a person sees the page it drives.
   useEffect(() => {
     const bridge = window.desktopBridge?.preview;
-    // The desktop tab only exists once settings hydrate, so wait for that too.
     if (!bridge || !serverDriven || !clientSettingsHydrated) return;
     withDesktopTab(runtimeTabId, () => bridge.setVisible(runtimeTabId, active));
   }, [active, clientSettingsHydrated, runtimeTabId, serverDriven]);
