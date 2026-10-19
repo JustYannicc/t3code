@@ -66,7 +66,8 @@ const withTelemetry = <A, E, R>(
 const rpcSpans = (ended: ReadonlyArray<Tracer.NativeSpan>) =>
   ended.filter((span) => span.name.startsWith("ws.rpc."));
 
-// Keep assertions about application instrumentation separate from Effect RPC spans.
+// RpcTest keeps Effect's own RpcServer/RpcClient spans, which ws.ts turns off with
+// `disableTracing: true`.
 const appSpans = (ended: ReadonlyArray<Tracer.NativeSpan>) =>
   ended.filter((span) => span.attributes.get("rpc.system.name") !== "effect_rpc");
 
