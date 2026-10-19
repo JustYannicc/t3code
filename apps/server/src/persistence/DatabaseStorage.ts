@@ -1,4 +1,5 @@
 import type { DatabaseStorageStatus } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -89,7 +90,17 @@ const make = Effect.gen(function* () {
     Effect.catch((cause) => Effect.logWarning("Database space reclamation failed", { cause })),
   );
 
-  const compact = maintenance.compactEventStore.pipe(
+  const compact = Effect.gen(function* () {
+    let sliceStarted = yield* Clock.monotonicTimeNanos;
+    const betweenPages = Effect.gen(function* () {
+      const elapsed = (yield* Clock.monotonicTimeNanos) - sliceStarted;
+      if (elapsed < 25_000_000n) return;
+      // Keep background maintenance at 10% duty, including pages that exceed the budget.
+      yield* Effect.sleep((Number(elapsed) / 1_000_000) * 9);
+      sliceStarted = yield* Clock.monotonicTimeNanos;
+    });
+    return yield* maintenance.compactEventStore(betweenPages);
+  }).pipe(
     Effect.tap((result) =>
       result.deletedEventCount > 0 || result.deletedReceiptCount > 0
         ? Effect.logInfo("Compacted orchestration history", result)

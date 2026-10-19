@@ -330,7 +330,7 @@ it.effect("discovers on the reader worker and deletes on the writer", () =>
           }),
       );
       const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
-      const result = yield* maintenance.compactEventStore;
+      const result = yield* maintenance.compactEventStore();
       assert.equal(result.deletedEventCount, 148);
       assert.equal(result.deletedReceiptCount, 100);
       assert.deepEqual(
@@ -494,7 +494,7 @@ it.effect("keeps other database work runnable while discovering compaction candi
         }).pipe(Effect.forkScoped),
       );
 
-      const summary = yield* maintenance.compactEventStore.pipe(
+      const summary = yield* maintenance.compactEventStore().pipe(
         Effect.withTracer(tracer),
         Effect.provideService(Scheduler.MaxOpsBeforeYield, Number.POSITIVE_INFINITY),
         Effect.tap(() =>
@@ -1124,7 +1124,7 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
         ON CONFLICT(command_id) DO NOTHING
       `;
 
-      const summary = yield* maintenance.compactEventStore;
+      const summary = yield* maintenance.compactEventStore();
       // Superseded state spans several discovery pages. Both turn-item updates
       // stay, and so do the first message and node events (replay order). The
       // rename stays too: visits are read state and only supersede each other.
