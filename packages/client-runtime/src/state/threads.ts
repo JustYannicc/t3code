@@ -361,6 +361,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         })),
       ),
     );
+  const clearStreamError = SubscriptionRef.update(state, (current) =>
+    Option.isNone(current.error) ? current : { ...current, error: Option.none() },
+  );
 
   const setThread = Effect.fn("EnvironmentThreadState.setThread")(function* (
     thread: OrchestrationV2ThreadProjection,
@@ -779,11 +782,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const resumingLive = yield* Ref.make(initialState.status === "live");
   const markSynchronizing = Effect.gen(function* () {
     if (yield* Ref.get(resumingLive)) return;
-    yield* SubscriptionRef.update(state, (current) =>
-      current.status === "deleted"
-        ? current
-        : { ...current, status: "synchronizing" as const, error: Option.none() },
-    );
+    yield* setConnecting;
   });
 
   yield* markSynchronizing;
@@ -859,6 +858,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
                           latestLocalTurnOrdinal: httpResult.history.latestLocalTurnOrdinal ?? null,
                         }
                       : EMPTY_THREAD_HISTORY_META;
+                  yield* clearStreamError;
                   yield* setThread(httpResult.snapshot.projection, { history });
                   yield* remember;
                 }),
@@ -880,11 +880,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         const canResume = Option.isSome(current.data) && !retrySnapshot;
         const acceptBoundedSnapshot = yield* Ref.get(acceptsBoundedSocketSnapshots);
         if (!supportsCompletionMarker && canResume) {
-          yield* SubscriptionRef.update(state, (value) => ({
-            ...value,
-            status: value.status === "deleted" ? value.status : ("live" as const),
-            error: Option.none(),
-          }));
+          yield* SubscriptionRef.update(state, (value) =>
+            value.status === "deleted" || Option.isSome(value.error)
+              ? value
+              : { ...value, status: "live" as const },
+          );
         }
 
         return {
@@ -916,7 +916,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
                   );
                   if (!complete) return Effect.succeed(items);
                   synchronized = true;
-                  return Deferred.succeed(completed, undefined).pipe(Effect.as(items));
+                  // Clear on receipt so applying buffered frames cannot erase a later failure.
+                  return Deferred.succeed(completed, undefined).pipe(
+                    Effect.andThen(clearStreamError),
+                    Effect.as(items),
+                  );
                 }),
               );
               const watched = needsMarker

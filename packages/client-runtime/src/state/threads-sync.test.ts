@@ -1911,6 +1911,51 @@ describe("EnvironmentThreads", () => {
     }),
   );
 
+  it.effect.each([false, true])(
+    "keeps stream errors visible through expected-failure retries with completion markers %s",
+    (completionMarker) =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({ cached: BASE_PROJECTION, completionMarker });
+        yield* Queue.take(harness.subscribed);
+        if (completionMarker) {
+          yield* Queue.offerAll(harness.inputs, [snapshot(BASE_PROJECTION), synchronized()]);
+        }
+        yield* awaitThreadState(harness.observed, (state) => state.status === "live");
+
+        yield* Queue.offer(harness.inputs, new Error("stream failed"));
+        yield* awaitThreadState(harness.observed, (state) => Option.isSome(state.error));
+        yield* TestClock.adjust("250 millis");
+        yield* Queue.take(harness.subscribed);
+        const retrying = yield* SubscriptionRef.get(harness.threadState);
+        expect(Option.getOrUndefined(retrying.error)).toBe("stream failed");
+        expect(Option.getOrThrow(retrying.data)).toEqual(BASE_PROJECTION);
+
+        if (!completionMarker) {
+          yield* Queue.offer(harness.inputs, new Error("still unavailable"));
+          yield* awaitThreadState(
+            harness.observed,
+            (state) => Option.getOrUndefined(state.error) === "still unavailable",
+          );
+          yield* TestClock.adjust("500 millis");
+          yield* Queue.take(harness.subscribed);
+          expect(
+            Option.getOrUndefined((yield* SubscriptionRef.get(harness.threadState)).error),
+          ).toBe("still unavailable");
+        }
+
+        yield* Queue.offer(
+          harness.inputs,
+          completionMarker ? synchronized() : snapshot(BASE_PROJECTION),
+        );
+        const recovered = yield* awaitThreadState(
+          harness.observed,
+          (state) => state.status === "live" && Option.isNone(state.error),
+        );
+        expect(Option.getOrThrow(recovered.data)).toEqual(BASE_PROJECTION);
+        expect(yield* Ref.get(harness.subscriptionCount)).toBe(completionMarker ? 2 : 3);
+      }),
+  );
+
   it.effect("recovers from a transient domain failure without replacing the session", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
