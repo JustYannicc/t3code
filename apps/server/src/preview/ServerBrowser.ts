@@ -1276,7 +1276,7 @@ const make = Effect.gen(function* () {
       if (
         tab.control.agentId !== null &&
         tab.desktop === null &&
-        !seen(tab) &&
+        tab.viewers.size === 0 &&
         tab.usedAt < cutoff
       )
         dropTab(tab, true);

@@ -1491,7 +1491,7 @@ it.live("control updates replace a stalled viewer backlog in the order they happ
   ).pipe(Effect.provide(layer)),
 );
 
-it.live("idle cleanup frees capacity while retaining streamed and natively shown agent tabs", () =>
+it.live("an agent's tabs stop at the limit until an unwatched idle tab closes", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const { broker, tabId } = yield* ready;
@@ -1500,12 +1500,7 @@ it.live("idle cleanup frees capacity while retaining streamed and natively shown
         operation: "open",
         input: { reuseExistingTab: false, show: false },
       });
-      desktopRendersNext = true;
-      const nativeShown = yield* open;
-      desktopVisibleTabs.add(nativeShown.tabId!);
-      desktopRendersNext = true;
-      yield* open;
-      for (let count = 3; count < 8; count += 1) yield* open;
+      for (let count = 1; count < 8; count += 1) yield* open;
       expect(yield* Effect.flip(open)).toMatchObject({
         _tag: "PreviewAutomationControlInterruptedError",
         reason: "tabLimit",
@@ -1524,7 +1519,7 @@ it.live("idle cleanup frees capacity while retaining streamed and natively shown
       const manager = yield* Manager.PreviewManager;
       const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
       expect(sessions.map((session) => session.tabId).toSorted()).toEqual(
-        [tabId, nativeShown.tabId, reopened.tabId].toSorted(),
+        [tabId, reopened.tabId].toSorted(),
       );
     }),
   ).pipe(Effect.provide(layer)),
