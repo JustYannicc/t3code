@@ -14,8 +14,10 @@ import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
+import * as Scheduler from "effect/Scheduler";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import * as Tracer from "effect/Tracer";
 import type {
   BackgroundScope,
   VcsStatusLocalResult,
@@ -81,9 +83,15 @@ function layerTestFor(state: {
   remoteStatusError?: GitManagerError;
   backgroundWorkEnabled?: boolean;
   beforeRemoteStatus?: Effect.Effect<void>;
+  fileSystem?: FileSystem.FileSystem;
+  pullCurrentBranch?: GitWorkflowService.GitWorkflowService["Service"]["pullCurrentBranch"];
 }) {
   return VcsStatusBroadcaster.layer.pipe(
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(
+      state.fileSystem
+        ? Layer.succeed(FileSystem.FileSystem, state.fileSystem)
+        : NodeServices.layer,
+    ),
     Layer.provide(layerBackgroundPolicy(() => state.backgroundWorkEnabled !== false)),
     Layer.provide(
       Layer.mock(GitWorkflowService.GitWorkflowService)({
@@ -123,6 +131,7 @@ function layerTestFor(state: {
             state.localInvalidationCalls += 1;
             state.remoteInvalidationCalls += 1;
           }),
+        ...(state.pullCurrentBranch ? { pullCurrentBranch: state.pullCurrentBranch } : {}),
       }),
     ),
   );
@@ -1213,6 +1222,93 @@ describe("VcsStatusBroadcaster", () => {
       assert.deepStrictEqual(yield* Deferred.await(published), state.currentLocalStatus);
     }).pipe(Effect.provide(layerTestFor(state)), Effect.scoped);
   });
+
+  it.effect.each(["getStatus", "refreshStatus", "autoPull", "autoPullFailure"] as const)(
+    "%s keeps response parts consistent when local state changes after the remote cache write",
+    (operation) => {
+      const state: Parameters<typeof layerTestFor>[0] = {
+        currentLocalStatus: baseLocalStatus,
+        currentRemoteStatus: { ...remoteStatusWithPr, aheadCount: 3, behindCount: 5 },
+        localStatusCalls: 0,
+        remoteStatusCalls: 0,
+        localInvalidationCalls: 0,
+        remoteInvalidationCalls: 0,
+        fileSystem: FileSystem.makeNoop({ realPath: (cwd) => Effect.succeed(cwd) }),
+      };
+      const autoPull = operation === "autoPull" || operation === "autoPullFailure";
+      if (autoPull) {
+        state.currentLocalStatus = { ...baseLocalStatus, isDefaultRef: true };
+        state.currentRemoteStatus = { ...remoteStatusWithPr, aheadCount: 0, behindCount: 5 };
+        state.pullCurrentBranch = () =>
+          operation === "autoPullFailure"
+            ? Effect.fail(
+                new GitCommandError({
+                  operation: "test.pull",
+                  command: "pull",
+                  cwd: "/repo",
+                  detail: "Pull failed.",
+                }),
+              )
+            : Effect.succeed({
+                status: "pulled",
+                refName: "feature/status-broadcast",
+                upstreamRef: "origin/main",
+              });
+      }
+      const layerTest = layerTestFor(state).pipe(
+        Layer.provide(
+          Layer.succeed(VcsStatusBroadcaster.VcsAutoPullPolicy, {
+            isEnabled: () => Effect.succeed(autoPull),
+          }),
+        ),
+      );
+      return Effect.gen(function* () {
+        const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+        let switched = false;
+        let remoteWritten = false;
+        const writeCompleted = yield* Deferred.make<void>();
+        const localRefresh = yield* Effect.gen(function* () {
+          yield* Deferred.await(writeCompleted);
+          state.currentLocalStatus = { ...baseLocalStatus, refName: "feature/next-status" };
+          yield* broadcaster.refreshLocalStatus("/repo");
+          switched = true;
+        }).pipe(Effect.forkScoped);
+        const scheduler = new Scheduler.MixedScheduler();
+        const shouldYield = scheduler.shouldYield.bind(scheduler);
+        scheduler.shouldYield = (fiber) => (remoteWritten && !switched) || shouldYield(fiber);
+        const tracer = Tracer.make({
+          span: (options) => {
+            const span = new Tracer.NativeSpan(options);
+            const end = span.end.bind(span);
+            span.end = (time, exit) => {
+              end(time, exit);
+              if (
+                options.name !== "VcsStatusBroadcaster.updateCachedRemoteStatus" ||
+                remoteWritten
+              ) {
+                return;
+              }
+              // Yield this reader after its write until the local refresh finishes.
+              remoteWritten = true;
+              Deferred.doneUnsafe(writeCompleted, Effect.void);
+            };
+            return span;
+          },
+        });
+        const status = yield* (
+          operation === "getStatus"
+            ? broadcaster.getStatus({ cwd: "/repo" })
+            : broadcaster.refreshStatus("/repo")
+        ).pipe(Effect.withTracer(tracer), Effect.provideService(Scheduler.Scheduler, scheduler));
+        yield* Fiber.join(localRefresh);
+        assert.isTrue(switched);
+        assert.equal(status.refName, "feature/next-status");
+        assert.isNull(status.pr);
+        assert.equal(status.aheadCount, 0);
+        assert.equal(status.behindCount, 0);
+      }).pipe(Effect.provide(layerTest), Effect.scoped);
+    },
+  );
 
   it.effect("recovers a discarded branch lookup on the next permitted turn-end refresh", () => {
     const state: Parameters<typeof layerTestFor>[0] = {

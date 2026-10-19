@@ -309,6 +309,14 @@ export const make = Effect.gen(function* () {
     return yield* loadLocalStatus(cwd);
   });
 
+  const getStatusParts = Effect.fn("VcsStatusBroadcaster.getStatusParts")(function* (cwd: string) {
+    const cached = yield* getCachedStatus(cwd);
+    if (cached?.local) {
+      return { local: cached.local.value, remote: cached.remote?.value ?? null };
+    }
+    return { local: yield* loadLocalStatus(cwd), remote: null };
+  });
+
   const withFileSystem = Effect.provideService(FileSystem.FileSystem, fs);
 
   const getStatus: VcsStatusBroadcaster["Service"]["getStatus"] = Effect.fn(
@@ -325,9 +333,9 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const latest = yield* getCachedStatus(cwd);
         const remote = latest?.remote ?? (yield* readRemoteStatus(cwd));
-        const value = yield* updateCachedRemoteStatus(cwd, remote);
-        const local = yield* getOrLoadLocalStatus(cwd);
-        return mergeGitStatusParts(local, value);
+        yield* updateCachedRemoteStatus(cwd, remote);
+        const parts = yield* getStatusParts(cwd);
+        return mergeGitStatusParts(parts.local, parts.remote);
       }),
     );
   });
@@ -399,13 +407,10 @@ export const make = Effect.gen(function* () {
       pullAttempted = true;
       yield* workflow.pullCurrentBranch(cwd);
       yield* workflow.invalidateStatus(cwd);
-      const refreshedLocal = yield* refreshLocalStatusCore(cwd);
+      yield* refreshLocalStatusCore(cwd);
       const refreshedRemote = yield* readRemoteStatus(cwd, { refreshUpstream: false });
-      const value = yield* updateCachedRemoteStatus(cwd, refreshedRemote, { publish: true });
-      return {
-        local: (yield* getCachedStatus(cwd))?.local?.value ?? refreshedLocal,
-        remote: value,
-      };
+      yield* updateCachedRemoteStatus(cwd, refreshedRemote, { publish: true });
+      return yield* getStatusParts(cwd);
     }).pipe(
       Effect.catch((error) =>
         Effect.gen(function* () {
@@ -416,9 +421,9 @@ export const make = Effect.gen(function* () {
           if (!pullAttempted) return null;
           // A pull or its follow-up reads can fail after local state has changed.
           // Let a failed reconciliation reach the caller instead of publishing old status.
-          const local = yield* refreshLocalStatusCore(cwd);
-          const value = yield* updateCachedRemoteStatus(cwd, remoteRead, { publish: true });
-          return { local, remote: value };
+          yield* refreshLocalStatusCore(cwd);
+          yield* updateCachedRemoteStatus(cwd, remoteRead, { publish: true });
+          return yield* getStatusParts(cwd);
         }),
       ),
     );
@@ -469,9 +474,9 @@ export const make = Effect.gen(function* () {
         yield* updateCachedLocalStatus(cwd, local, { publish: true });
         const pulled = yield* maybeAutoPull(cwd, remoteRead, [rawCwd]);
         if (pulled !== null) return mergeGitStatusParts(pulled.local, pulled.remote);
-        const remote = yield* updateCachedRemoteStatus(cwd, remoteRead, { publish: true });
-        const currentLocal = yield* getOrLoadLocalStatus(cwd);
-        return mergeGitStatusParts(currentLocal, remote);
+        yield* updateCachedRemoteStatus(cwd, remoteRead, { publish: true });
+        const parts = yield* getStatusParts(cwd);
+        return mergeGitStatusParts(parts.local, parts.remote);
       }),
     );
   });
