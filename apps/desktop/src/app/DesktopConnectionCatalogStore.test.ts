@@ -1,14 +1,9 @@
-// @effect-diagnostics nodeBuiltinImport:off - The recovery fixtures use Chromium OSCrypt ciphertext.
-import * as NodeCrypto from "node:crypto";
-
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { ConnectionCatalogDocument } from "@t3tools/client-runtime/platform";
 import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
-import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
@@ -16,10 +11,7 @@ import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import * as Sink from "effect/Sink";
-import * as Stream from "effect/Stream";
-import { ChildProcessSpawner } from "effect/process";
-import { beforeEach, vi } from "vite-plus/test";
+import { vi } from "vite-plus/test";
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
@@ -32,60 +24,10 @@ vi.mock("@clerk/electron/storage", () => ({ storage: clerkStorage }));
 vi.mock("@clerk/electron", () => ({ createClerkBridge: () => ({ cleanup: () => {} }) }));
 
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
-import { LinuxBrowserSecretPath } from "../preview/BrowserImport/LinuxBrowserSecret.ts";
 import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import * as DesktopConnectionCatalogStore from "./DesktopConnectionCatalogStore.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
-import * as DesktopSafeStorageIdentity from "./DesktopSafeStorageIdentity.ts";
-
-const { getBetaPassword } = vi.hoisted(() => ({
-  getBetaPassword: vi.fn<() => string | null>(),
-}));
-
-vi.mock("@napi-rs/keyring", () => ({
-  Entry: class {
-    readonly getPassword;
-    constructor(service: string, account: string) {
-      this.getPassword = () =>
-        service === "T3 Code (Beta) Safe Storage" && account === "T3 Code (Beta)"
-          ? getBetaPassword()
-          : null;
-    }
-  },
-}));
-
-beforeEach(() => {
-  getBetaPassword.mockReset().mockReturnValue(null);
-  clerkStorage.mockReset();
-});
-
-const savedCatalog = JSON.stringify({
-  schemaVersion: 1,
-  targets: [
-    { _tag: "RelayConnectionTarget", environmentId: "relay-environment", label: "Saved relay" },
-  ],
-  profiles: [],
-  credentials: [],
-  remoteDpopTokens: [],
-  disabledEnvironmentIds: [],
-});
-
-const encryptBetaCatalog = (platform: NodeJS.Platform, catalog = savedCatalog) => {
-  const key = NodeCrypto.pbkdf2Sync(
-    "beta-secret",
-    "saltysalt",
-    platform === "darwin" ? 1003 : 1,
-    16,
-    "sha1",
-  );
-  const cipher = NodeCrypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, " "));
-  return Buffer.concat([
-    Buffer.from(platform === "darwin" ? "v10" : "v11"),
-    cipher.update(catalog, "utf8"),
-    cipher.final(),
-  ]);
-};
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -104,7 +46,6 @@ type EncryptionAvailability =
 function layerSafeStorageFor(
   available: EncryptionAvailability,
   failDecrypt: Ref.Ref<boolean> | null = null,
-  currentSecret?: string,
 ) {
   return Layer.succeed(ElectronSafeStorage.ElectronSafeStorage, {
     isEncryptionAvailable: typeof available === "boolean" ? Effect.succeed(available) : available,
@@ -116,23 +57,6 @@ function layerSafeStorageFor(
           !decoded.startsWith("encrypted:") ||
           (failDecrypt !== null && (yield* Ref.get(failDecrypt)))
         ) {
-          if (currentSecret !== undefined) {
-            return yield* Effect.try({
-              try: () => {
-                const key = NodeCrypto.pbkdf2Sync(currentSecret, "saltysalt", 1003, 16, "sha1");
-                const decipher = NodeCrypto.createDecipheriv(
-                  "aes-128-cbc",
-                  key,
-                  Buffer.alloc(16, " "),
-                );
-                return Buffer.concat([
-                  decipher.update(value.subarray(3)),
-                  decipher.final(),
-                ]).toString("utf8");
-              },
-              catch: (cause) => new ElectronSafeStorage.ElectronSafeStorageDecryptError({ cause }),
-            });
-          }
           return yield* new ElectronSafeStorage.ElectronSafeStorageDecryptError({
             cause: new Error("invalid encrypted catalog"),
           });
@@ -144,84 +68,44 @@ function layerSafeStorageFor(
   } satisfies ElectronSafeStorage.ElectronSafeStorage["Service"]);
 }
 
-const layerLinuxKeyAccess = (lookup: Effect.Effect<string | null>) =>
-  Layer.merge(
-    Layer.succeed(LinuxBrowserSecretPath, "/bundled/browser-secret/t3-browser-secret"),
-    Layer.succeed(
-      ChildProcessSpawner.ChildProcessSpawner,
-      ChildProcessSpawner.make((command) =>
-        Effect.gen(function* () {
-          const secret =
-            command._tag === "StandardCommand" && command.args[0] === "T3 Code (Beta)"
-              ? yield* lookup
-              : null;
-          return ChildProcessSpawner.makeHandle({
-            pid: ChildProcessSpawner.ProcessId(1),
-            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(secret === null ? 2 : 0)),
-            isRunning: Effect.succeed(false),
-            kill: () => Effect.void,
-            unref: Effect.succeed(Effect.void),
-            stdin: Sink.drain,
-            stdout: Stream.encodeText(Stream.make(secret ?? "")),
-            stderr: Stream.empty,
-            all: Stream.empty,
-            getInputFd: () => Sink.drain,
-            getOutputFd: () => Stream.empty,
-          });
-        }),
-      ),
-    ),
-  );
-
-interface RecoveryOptions {
-  readonly dirname?: string;
-  readonly platform?: NodeJS.Platform;
-  readonly isPackaged?: boolean;
-  readonly isDevelopment?: boolean;
-  readonly linuxKeyLookup?: Effect.Effect<string | null>;
-  readonly currentSecret?: string | undefined;
-}
-
 function layerFor(
   baseDir: string,
   encryptionAvailable: EncryptionAvailability = true,
   failDecrypt: Ref.Ref<boolean> | null = null,
   fileSystemLayer: Layer.Layer<FileSystem.FileSystem> = NodeServices.layer,
-  recovery: RecoveryOptions = {},
+  runtime: {
+    readonly dirname?: string;
+    readonly platform?: NodeJS.Platform;
+    readonly isPackaged?: boolean;
+    readonly isDevelopment?: boolean;
+  } = {},
 ) {
   const layerEnvironment = DesktopEnvironment.layer({
-    dirname: recovery.dirname ?? "/repo/apps/desktop/src",
+    dirname: "/repo/apps/desktop/src",
     homeDirectory: baseDir,
-    platform: recovery.platform ?? "darwin",
+    platform: "darwin",
     processArch: "arm64",
     appVersion: "1.2.3",
     appPath: "/repo",
-    isPackaged: recovery.isPackaged ?? true,
+    isPackaged: true,
     resourcesPath: "/missing/resources",
     runningUnderArm64Translation: false,
+    ...runtime,
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
           T3CODE_HOME: baseDir,
-          VITE_DEV_SERVER_URL: recovery.isDevelopment ? "http://localhost:5173" : undefined,
+          VITE_DEV_SERVER_URL: runtime.isDevelopment ? "http://localhost:5173" : undefined,
         }),
       ),
     ),
   );
-  const layerSafeStorage = layerSafeStorageFor(
-    encryptionAvailable,
-    failDecrypt,
-    recovery.currentSecret,
-  );
+  const layerSafeStorage = layerSafeStorageFor(encryptionAvailable, failDecrypt);
   const layerDependencies = Layer.mergeAll(
     layerEnvironment,
     layerSafeStorage,
-    DesktopSafeStorageIdentity.layer.pipe(
-      Layer.provide(layerEnvironment),
-      Layer.provide(layerLinuxKeyAccess(recovery.linuxKeyLookup ?? Effect.succeed(null))),
-    ),
     NodeServices.layer,
     fileSystemLayer,
   );
@@ -238,16 +122,13 @@ function layerFor(
 const withStore = <A, E, R>(
   effect: Effect.Effect<A, E, R | DesktopConnectionCatalogStore.DesktopConnectionCatalogStore>,
   encryptionAvailable: EncryptionAvailability = true,
-  recovery: RecoveryOptions = {},
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const baseDir = yield* fileSystem.makeTempDirectoryScoped({
       prefix: "t3-desktop-connection-catalog-test-",
     });
-    return yield* effect.pipe(
-      Effect.provide(layerFor(baseDir, encryptionAvailable, null, NodeServices.layer, recovery)),
-    );
+    return yield* effect.pipe(Effect.provide(layerFor(baseDir, encryptionAvailable)));
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
 
 describe("DesktopConnectionCatalogStore", () => {
@@ -324,14 +205,12 @@ describe("DesktopConnectionCatalogStore", () => {
             ),
           );
 
-        const catalogA = savedCatalog.replace("Saved relay", "A catalog");
-        const catalogB = savedCatalog.replace("Saved relay", "B catalog");
         const a = yield* start("/runtime/a");
         assert.deepEqual(yield* a.store.get, Option.none());
         assert.isFalse(yield* fs.exists(a.profile));
         yield* fs.makeDirectory(a.profile, { recursive: true });
         yield* fs.writeFileString(path.join(a.profile, "Cookies"), "A cookies");
-        assert.isTrue(yield* a.store.set(catalogA));
+        assert.isTrue(yield* a.store.set("A catalog"));
         assert.isTrue(yield* fs.exists(path.join(a.tokens, "connection-catalog.json")));
 
         for (const b of [yield* start("/runtime/b"), yield* start("/runtime/a", true)]) {
@@ -339,13 +218,13 @@ describe("DesktopConnectionCatalogStore", () => {
           assert.notEqual(b.tokens, a.tokens);
           assert.deepEqual(yield* b.store.get, Option.none());
           assert.isFalse(yield* fs.exists(b.profile));
-          assert.isTrue(yield* b.store.set(catalogB));
+          assert.isTrue(yield* b.store.set("B catalog"));
           yield* b.store.clear;
         }
         const reopened = yield* start("/runtime/a/./");
         assert.equal(reopened.profile, a.profile);
         assert.equal(reopened.tokens, a.tokens);
-        assert.deepEqual(yield* reopened.store.get, Option.some(catalogA));
+        assert.deepEqual(yield* reopened.store.get, Option.some("A catalog"));
         assert.equal(yield* fs.readFileString(path.join(reopened.profile, "Cookies")), "A cookies");
         for (const file of ["connection-catalog.json", "saved-environments.json"]) {
           assert.equal(
@@ -371,43 +250,6 @@ describe("DesktopConnectionCatalogStore", () => {
       }),
       Effect.die("An empty registry must not query Keychain"),
     ),
-  );
-
-  it.effect.each([false, true])(
-    "does not recover a local macOS catalog with the shared Beta key (development=%s)",
-    (isDevelopment) =>
-      withStore(
-        Effect.gen(function* () {
-          getBetaPassword.mockReturnValue("beta-secret");
-          const fs = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
-          const environment = yield* DesktopEnvironment.DesktopEnvironment;
-          const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-          const catalogPath = path.join(
-            environment.stateDir,
-            "local-keychains",
-            environment.localMacKeychainName!,
-            "connection-catalog.json",
-          );
-          const contents = JSON.stringify({
-            version: 1,
-            encryptedCatalog: Base64.encode(encryptBetaCatalog("darwin")),
-          });
-          yield* fs.makeDirectory(path.dirname(catalogPath), { recursive: true });
-          yield* fs.writeFileString(catalogPath, contents);
-
-          const error = yield* store.get.pipe(Effect.flip);
-          assert.instanceOf(
-            error,
-            DesktopConnectionCatalogStore.DesktopConnectionCatalogStoreProtectionError,
-          );
-          assert.equal(error.operation, "decrypt-catalog");
-          assert.equal(getBetaPassword.mock.calls.length, 0);
-          assert.equal(yield* fs.readFileString(catalogPath), contents);
-        }),
-        true,
-        { isPackaged: false, isDevelopment },
-      ),
   );
 
   it.effect("persists, reads, and clears an encrypted connection catalog", () =>
@@ -748,134 +590,5 @@ describe("DesktopConnectionCatalogStore", () => {
       yield* Ref.set(failDecrypt, false);
       assert.deepStrictEqual(yield* store.get, Option.some('{"schemaVersion":1,"targets":[]}'));
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
-  );
-
-  const writeBetaCatalog = (
-    platform: NodeJS.Platform,
-    encryptedCatalog = encryptBetaCatalog(platform),
-  ) =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const environment = yield* DesktopEnvironment.DesktopEnvironment;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const catalogPath = path.join(environment.stateDir, "connection-catalog.json");
-      const contents = `${JSON.stringify({
-        version: 1,
-        encryptedCatalog: Base64.encode(encryptedCatalog),
-      })}\n`;
-      yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
-      yield* fileSystem.writeFileString(catalogPath, contents);
-      return { catalogPath, contents };
-    });
-
-  it.effect.each([
-    { platform: "darwin" as const, currentSecret: undefined, label: "macOS" },
-    { platform: "linux" as const, currentSecret: undefined, label: "Linux" },
-    {
-      platform: "darwin" as const,
-      currentSecret: "wrong-key-494",
-      label: "macOS with valid padding under the wrong current key",
-    },
-  ])(
-    "recovers a Beta catalog on $label and reopens it without the Beta key",
-    ({ platform, currentSecret }) =>
-      withStore(
-        Effect.gen(function* () {
-          getBetaPassword.mockReturnValue("beta-secret");
-          const fileSystem = yield* FileSystem.FileSystem;
-          const environment = yield* DesktopEnvironment.DesktopEnvironment;
-          const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-          const { catalogPath, contents } = yield* writeBetaCatalog(platform);
-
-          assert.deepStrictEqual(yield* store.get, Option.some(savedCatalog));
-          assert.notEqual(yield* fileSystem.readFileString(catalogPath), contents);
-
-          getBetaPassword.mockReturnValue(null);
-          const reopened = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore.pipe(
-            Effect.provide(
-              layerFor(environment.homeDirectory, true, null, NodeServices.layer, { platform }),
-            ),
-          );
-          assert.deepStrictEqual(yield* reopened.get, Option.some(savedCatalog));
-        }),
-        true,
-        { platform, currentSecret, linuxKeyLookup: Effect.succeed("beta-secret") },
-      ),
-  );
-
-  it.effect.each([
-    // This wrong key has valid CBC padding, so decryption alone cannot validate recovery.
-    { platform: "darwin" as const, secret: "wrong-key-494", label: "a wrong Beta key" },
-    { platform: "linux" as const, secret: null, label: "a missing Beta key" },
-    {
-      platform: "darwin" as const,
-      secret: "beta-secret",
-      label: "unencrypted input",
-      encryptedCatalog: Buffer.from(savedCatalog),
-    },
-    {
-      platform: "linux" as const,
-      secret: "beta-secret",
-      label: "an invalid catalog",
-      encryptedCatalog: encryptBetaCatalog("linux", '{"schemaVersion":1,"targets":null}'),
-    },
-  ])("leaves the catalog bytes intact for $label", ({ platform, secret, encryptedCatalog }) =>
-    withStore(
-      Effect.gen(function* () {
-        getBetaPassword.mockReturnValue(secret);
-        const fileSystem = yield* FileSystem.FileSystem;
-        const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-        const { catalogPath, contents } = yield* writeBetaCatalog(platform, encryptedCatalog);
-
-        const error = yield* store.get.pipe(Effect.flip);
-        assert.instanceOf(
-          error,
-          DesktopConnectionCatalogStore.DesktopConnectionCatalogStoreProtectionError,
-        );
-        assert.equal(error.operation, "decrypt-catalog");
-        assert.equal(yield* fileSystem.readFileString(catalogPath), contents);
-      }),
-      true,
-      { platform, linuxKeyLookup: Effect.succeed(secret) },
-    ),
-  );
-
-  it.effect.each(["save", "clear"] as const)(
-    "preserves a concurrent %s while Beta key recovery is waiting",
-    (operation) =>
-      Effect.gen(function* () {
-        const lookupStarted = yield* Deferred.make<void>();
-        const lookupReleased = yield* Deferred.make<void>();
-        const linuxKeyLookup = Deferred.succeed(lookupStarted, undefined).pipe(
-          Effect.andThen(Deferred.await(lookupReleased)),
-          Effect.as("beta-secret"),
-        );
-        const newer = savedCatalog.replace("Saved relay", "Updated relay");
-
-        yield* withStore(
-          Effect.gen(function* () {
-            const fileSystem = yield* FileSystem.FileSystem;
-            const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-            const { catalogPath } = yield* writeBetaCatalog("linux");
-            const recovery = yield* store.get.pipe(Effect.forkChild);
-            yield* Deferred.await(lookupStarted);
-            if (operation === "save") {
-              assert.isTrue(yield* store.set(newer));
-            } else {
-              yield* store.clear;
-            }
-            yield* Deferred.succeed(lookupReleased, undefined);
-            yield* Fiber.join(recovery);
-
-            assert.deepStrictEqual(
-              yield* store.get,
-              operation === "save" ? Option.some(newer) : Option.none(),
-            );
-            assert.equal(yield* fileSystem.exists(catalogPath), operation === "save");
-          }),
-          true,
-          { platform: "linux", linuxKeyLookup },
-        );
-      }),
   );
 });

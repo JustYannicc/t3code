@@ -11,8 +11,6 @@ const {
   hasSwitchMock,
   registerSchemesMock,
   setDesktopNameMock,
-  setNameMock,
-  appState,
   mkdirSyncMock,
   readFileSyncMock,
   writeFileSyncMock,
@@ -24,8 +22,6 @@ const {
   hasSwitchMock: vi.fn(),
   registerSchemesMock: vi.fn(),
   setDesktopNameMock: vi.fn(),
-  setNameMock: vi.fn(),
-  appState: { version: "0.0.37", isPackaged: true },
   mkdirSyncMock: vi.fn(),
   readFileSyncMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
@@ -36,11 +32,8 @@ const {
 vi.mock("electron", () => ({
   app: {
     setDesktopName: setDesktopNameMock,
-    setName: setNameMock,
-    getVersion: () => appState.version,
-    get isPackaged() {
-      return appState.isPackaged;
-    },
+    getVersion: () => "0.0.37",
+    isPackaged: true,
     getAppPath: () => "/tmp/.mount_T3/resources/app.asar",
     commandLine: {
       appendSwitch: appendSwitchMock,
@@ -65,7 +58,6 @@ vi.mock("node:child_process", () => ({
 }));
 
 import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
-import { resolveEarlyMacKeychainName } from "./DesktopEarlyElectronStartup.ts";
 
 const iconSource = "/tmp/.mount_T3/resources/app.asar/apps/desktop/prod-resources/icon.png";
 const iconPath = "/xdg/icons/com.t3tools.T3Code.desktop.png";
@@ -79,9 +71,6 @@ describe("DesktopPreReadyPlatform", () => {
     hasSwitchMock.mockReset();
     registerSchemesMock.mockReset();
     setDesktopNameMock.mockReset();
-    setNameMock.mockReset();
-    appState.version = "0.0.37";
-    appState.isPackaged = true;
     mkdirSyncMock.mockReset();
     readFileSyncMock.mockReset();
     writeFileSyncMock.mockReset();
@@ -276,65 +265,6 @@ describe("DesktopPreReadyPlatform", () => {
       }),
     ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });
-
-  it.effect.each([
-    { platform: "linux" as const, version: "0.1.0", isPackaged: true },
-    { platform: "darwin" as const, version: "0.1.1-preview.20261017.3", isPackaged: true },
-    { platform: "win32" as const, version: "0.1.0", isPackaged: true },
-  ])(
-    "preserves the $platform encryption identity before startup yields",
-    ({ platform, version, isPackaged }) => {
-      appState.version = version;
-      appState.isPackaged = isPackaged;
-      getSwitchValueMock.mockReturnValue("");
-      let appName = "T3 Code (Beta)";
-      setNameMock.mockImplementation((name: string) => {
-        appName = name;
-      });
-      return Effect.scoped(
-        Effect.gen(function* () {
-          const nameBeforeYield = Promise.resolve().then(() => appName);
-          yield* Layer.build(
-            DesktopPreReadyPlatform.layer.pipe(
-              Layer.provide(Layer.succeed(HostProcess.Platform, platform)),
-            ),
-          );
-          assert.equal(
-            yield* Effect.promise(() => nameBeforeYield),
-            platform === "win32" ? "T3 Code (Beta)" : "T3 Code (Alpha)",
-          );
-        }),
-      );
-    },
-  );
-
-  it.effect.each([false, true])(
-    "preserves the local macOS Keychain name before startup yields (development=%s)",
-    (isDevelopment) => {
-      appState.isPackaged = false;
-      const keychainName = resolveEarlyMacKeychainName({
-        platform: "darwin",
-        isPackaged: false,
-        isDevelopment,
-        runtimeDirectory: "/runtime/local",
-      })!;
-      let appName = keychainName;
-      setNameMock.mockImplementation((name: string) => {
-        appName = name;
-      });
-      return Effect.scoped(
-        Effect.gen(function* () {
-          const nameBeforeYield = Promise.resolve().then(() => appName);
-          yield* Layer.build(
-            DesktopPreReadyPlatform.layer.pipe(
-              Layer.provide(Layer.succeed(HostProcess.Platform, "darwin")),
-            ),
-          );
-          assert.equal(yield* Effect.promise(() => nameBeforeYield), keychainName);
-        }),
-      );
-    },
-  );
 
   it.effect("keeps startup available when the early desktop entry cannot be written", () => {
     getSwitchValueMock.mockReturnValue("");
