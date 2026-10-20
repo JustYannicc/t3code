@@ -3642,6 +3642,97 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect.each([
+    {
+      name: "an unflagged result with surrounding whitespace",
+      isError: false,
+      result: "  API Error: 400 Request rejected by a safeguard.\n",
+      expected: "API Error: 400 Request rejected by a safeguard.",
+    },
+    {
+      name: "a secret crossing the truncation boundary",
+      isError: true,
+      result: `API Error: 400 ${"x".repeat(440)} {"token":"${"synthetic-secret".repeat(100)}"} ${"y".repeat(100)}`,
+      expected: `API Error: 400 ${"x".repeat(440)} {"token":"[REDACTED]"} `.padEnd(500, "y"),
+    },
+    {
+      name: "ordinary assistant text",
+      isError: true,
+      result: "I found three files.",
+      expected: "Claude gave up after repeated API errors.",
+    },
+    {
+      name: "a listed non-diagnostic error",
+      isError: true,
+      result: "API Error: 400 Request rejected.",
+      errors: ["[ede_diagnostic] internal detail", "Tool execution failed: EACCES"],
+      expected: "Tool execution failed: EACCES",
+    },
+    {
+      name: "an HTTP 529 overload",
+      isError: true,
+      result: "API Error: 529 Specific overload detail.",
+      apiErrorStatus: 529,
+      expected: "Claude API is overloaded (529). Try again shortly.",
+    },
+    {
+      name: "an HTTP 429 rate limit",
+      isError: true,
+      result: "API Error: 429 Specific rate limit detail.",
+      apiErrorStatus: 429,
+      expected: "Claude API rate limit reached. Try again later.",
+    },
+    {
+      name: "a different terminal reason",
+      isError: true,
+      result: "API Error: 400 Request rejected.",
+      terminalReason: "prompt_too_long" as const,
+      expected:
+        "Claude stopped: the prompt exceeds the model's context window. Run /compact or start a new thread.",
+    },
+  ])("reports terminal API error text for $name", (input) =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      const now = yield* DateTime.now;
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-claude-specific-api-error"),
+          text: "Continue.",
+          attachments: [],
+        }),
+      );
+      const apiErrorStatus = input.apiErrorStatus ?? 400;
+      yield* Queue.offer(
+        harness.sdkMessages,
+        makeResultFrame({
+          uuid: "00000000-0000-4000-8000-000000000699",
+          result: input.result,
+          terminalReason: input.terminalReason ?? "api_error",
+          apiErrorStatus,
+          isError: input.isError,
+          ...(input.errors === undefined ? {} : { errors: input.errors }),
+        }),
+      );
+
+      const terminal = yield* Queue.take(harness.terminalReceipts);
+      assert.equal(terminal.status, "failed");
+      if (terminal.status !== "failed") return;
+      assert.equal(terminal.failure.message, input.expected);
+      assert.equal(terminal.failure.code, `api_error_${apiErrorStatus}`);
+      assert.equal(
+        terminal.failure.class,
+        apiErrorStatus === 429 ? "usage_limit" : "provider_error",
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
   it.effect("names an expired Claude login instead of the terminal API error", () =>
     Effect.gen(function* () {
       const configDir = "/synthetic/Claude config";
@@ -3673,7 +3764,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         }),
         makeResultFrame({
           uuid: "00000000-0000-4000-8000-000000000607",
-          result: "API Error",
+          result: "API Error: 401 Credentials expired.",
           terminalReason: "api_error",
         }),
       ]);
@@ -3932,7 +4023,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         harness.sdkMessages,
         makeResultFrame({
           uuid: "00000000-0000-4000-8000-000000000610",
-          result: "API Error",
+          result: recovered ? "API Error" : "API Error: 400 Specific provider detail.",
           terminalReason: "api_error",
         }),
       );
@@ -13192,6 +13283,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly state: "queued" | "start" | "done";
     readonly secondState?: "queued" | "start" | "done";
     readonly startedAt?: number;
+    readonly lastProgressAt?: number;
+    readonly durationMs?: number;
     readonly label?: string;
     readonly prompt?: string;
     readonly model?: string;
@@ -13217,6 +13310,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           model: input.model ?? "claude-opus-5[1m]",
           promptPreview: input.prompt ?? "Reply with exactly: A1",
           ...(input.startedAt === undefined ? {} : { startedAt: input.startedAt }),
+          ...(input.lastProgressAt === undefined ? {} : { lastProgressAt: input.lastProgressAt }),
+          ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }),
           ...(input.attempt === undefined ? {} : { attempt: input.attempt }),
           ...(input.state === "done" && input.omitResult !== true
             ? { resultPreview: "A1 excerpt" }
@@ -15388,6 +15483,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.equal(workflowMemberEvents(harness.events, 1).at(-1)?.subagent.status, "completed");
         assert.equal(workflowMemberEvents(harness.events, 2).at(-1)?.subagent.status, "completed");
         assert.deepEqual(
+          workflowMemberEvents(harness.events, 1).at(-1)?.subagent.completedAt,
+          yield* DateTime.now,
+        );
+        assert.deepEqual(
           threadMessages(harness.events, firstThreadId).map((event) => event.message.text),
           ["Reply with exactly: A1", "A1 from the transcript"],
         );
@@ -15447,6 +15546,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             uuid: "00000000-0000-4000-8000-000000001018",
             state: "done",
             attempt: 2,
+            startedAt: 1000,
+            durationMs: 500,
+            lastProgressAt: 4432,
           }),
         );
         yield* awaitUntil(
@@ -15454,22 +15556,24 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           "two-turn workflow member answer",
         );
         assert.deepEqual(currentAssistantAnswers().slice(-2), ["First answer", "Second answer"]);
+        const completedMember = workflowMemberEvents(harness.events, 1).at(-1)?.subagent;
+        assert.equal(
+          completedMember?.completedAt && DateTime.toEpochMillis(completedMember.completedAt),
+          4432,
+        );
         assert.notDeepEqual(
           workflowMemberEvents(harness.events, 1).at(-1)?.subagent.startedAt,
           previousStartedAt,
         );
-        yield* Queue.offer(
-          harness.sdkMessages,
+        yield* harness.offerAndWait(
           workflowSnapshot({
             uuid: "00000000-0000-4000-8000-000000001019",
             state: "start",
             attempt: 3,
           }),
         );
-        yield* awaitUntil(
-          () => workflowMemberEvents(harness.events, 1).at(-1)?.subagent.status === "running",
-          "retried workflow member running",
-        );
+        assert.equal(workflowMemberEvents(harness.events, 1).at(-1)?.subagent.status, "running");
+        assert.isNull(workflowMemberEvents(harness.events, 1).at(-1)?.subagent.completedAt);
         yield* Queue.offer(
           harness.sdkMessages,
           workflowSnapshot({
