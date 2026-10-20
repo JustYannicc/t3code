@@ -3796,6 +3796,24 @@ it.effect.each(["events", "receipts"] as const)(
         yield* sql`INSERT INTO concurrent_writes VALUES ('committed')`;
         assert.isFalse(yield* Deferred.isDone(compacted));
         assert.deepEqual(yield* sql`SELECT value FROM concurrent_writes`, [{ value: "committed" }]);
+        if (kind === "events") {
+          yield* sql`
+            INSERT INTO orchestration_events (
+              event_id, aggregate_kind, stream_id, stream_version, event_type,
+              occurred_at, actor_kind, payload_json, metadata_json, application_event_version
+            ) VALUES (
+              'after-bound', 'thread', 'imported', 2, 'thread.message-appended',
+              ${now}, 'user', '{}', '{}', 1
+            )
+          `;
+        } else {
+          yield* sql`
+            INSERT INTO orchestration_command_receipts (
+              command_id, aggregate_kind, aggregate_id, accepted_at, result_sequence,
+              status, command_type
+            ) VALUES ('after-bound', 'thread', 'imported', ${now}, 1, 'accepted', 'legacy')
+          `;
+        }
         yield* Deferred.succeed(releaseReader, undefined);
         yield* Fiber.join(reader);
         const result = yield* Fiber.join(compaction);
@@ -3804,9 +3822,9 @@ it.effect.each(["events", "receipts"] as const)(
         assert.equal(result.deletedReceiptCount, kind === "receipts" ? 1 : 0);
         const retained =
           kind === "events"
-            ? yield* sql`SELECT stream_id AS id FROM orchestration_events`
-            : yield* sql`SELECT aggregate_id AS id FROM orchestration_command_receipts`;
-        assert.deepEqual(retained, [{ id: "pending" }]);
+            ? yield* sql`SELECT event_id AS id FROM orchestration_events ORDER BY sequence`
+            : yield* sql`SELECT command_id AS id FROM orchestration_command_receipts ORDER BY rowid`;
+        assert.deepEqual(retained, [{ id: "pending" }, { id: "after-bound" }]);
       }).pipe(Effect.provide(maintenanceLayer));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
