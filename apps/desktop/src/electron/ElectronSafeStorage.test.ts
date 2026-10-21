@@ -34,16 +34,28 @@ const withStorage = <A, E>(
 beforeEach(() => vi.resetAllMocks());
 
 describe("macOS safe storage", () => {
-  it.effect("keeps the event loop responsive while native Keychain operations are pending", () =>
+  it.effect("yields while native Keychain operations are pending", () =>
     withStorage("darwin", (safeStorage) =>
       Effect.gen(function* () {
         const encrypted = Buffer.from([0, 128, 255]);
         const availability = Promise.withResolvers<boolean>();
         const encryption = Promise.withResolvers<Buffer>();
         const decryption = Promise.withResolvers<{ result: string; shouldReEncrypt: boolean }>();
-        storage.isAsyncEncryptionAvailable.mockReturnValue(availability.promise);
-        storage.encryptStringAsync.mockReturnValue(encryption.promise);
-        storage.decryptStringAsync.mockReturnValue(decryption.promise);
+        const availabilityStarted = Promise.withResolvers<void>();
+        const encryptionStarted = Promise.withResolvers<void>();
+        const decryptionStarted = Promise.withResolvers<void>();
+        storage.isAsyncEncryptionAvailable.mockImplementation(() => {
+          availabilityStarted.resolve();
+          return availability.promise;
+        });
+        storage.encryptStringAsync.mockImplementation(() => {
+          encryptionStarted.resolve();
+          return encryption.promise;
+        });
+        storage.decryptStringAsync.mockImplementation(() => {
+          decryptionStarted.resolve();
+          return decryption.promise;
+        });
         let completed = false;
         const work = yield* Effect.forkChild(
           Effect.all(
@@ -62,8 +74,13 @@ describe("macOS safe storage", () => {
           ),
         );
 
-        // A real event-loop turn must run while all three native operations are pending.
-        yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+        yield* Effect.promise(() =>
+          Promise.all([
+            availabilityStarted.promise,
+            encryptionStarted.promise,
+            decryptionStarted.promise,
+          ]),
+        );
         assert.lengthOf(storage.isAsyncEncryptionAvailable.mock.calls, 1);
         assert.deepEqual(storage.encryptStringAsync.mock.calls, [["secret"]]);
         assert.deepEqual(storage.decryptStringAsync.mock.calls, [[encrypted]]);
