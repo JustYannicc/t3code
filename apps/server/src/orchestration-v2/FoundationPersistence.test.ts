@@ -313,9 +313,11 @@ it.effect("paces scheduled compaction while preserving retention state and fixed
     let activeNanos = 0n;
     let eventPages = 0;
     const pauses: number[] = [];
+    const compactionSpans: Tracer.Span[] = [];
     const tracer = Tracer.make({
       span(options) {
         const span = new Tracer.NativeSpan(options);
+        if (span.name === "ProjectionMaintenance.compactEventStore") compactionSpans.push(span);
         const end = span.end.bind(span);
         span.end = (time, exit) => {
           end(time, exit);
@@ -337,6 +339,10 @@ it.effect("paces scheduled compaction while preserving retention state and fixed
       yield* TestClock.adjust("269 millis");
       assert.equal(eventPages, 1);
       assert.deepEqual(pauses, [270]);
+      assert.deepEqual(
+        compactionSpans.map((span) => span.status._tag),
+        ["Started"],
+      );
       // Foreground commits must not extend the compactor's initial scan bounds.
       yield* sql`INSERT INTO orchestration_events (
           event_id, aggregate_kind, stream_id, stream_version, event_type,
@@ -371,6 +377,10 @@ it.effect("paces scheduled compaction while preserving retention state and fixed
       }),
     );
     assert.deepEqual(pauses, Array(5).fill(270));
+    assert.deepEqual(
+      compactionSpans.map((span) => span.status._tag),
+      ["Ended"],
+    );
     assert.deepEqual(yield* sql`SELECT sequence FROM orchestration_events ORDER BY sequence`, [
       { sequence: 1 },
       { sequence: 101 },
