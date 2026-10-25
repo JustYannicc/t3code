@@ -229,7 +229,7 @@ export const layer: Layer.Layer<
 
     /** Retain newest and oldest keyed events to preserve client insertion order; page all events to bound sparse scans.
      * Keep turn-item.updated because replay assigns positions on first write. */
-    const compactEventStore = Effect.fnUntraced(function* (
+    const compactEventStore = Effect.fn("ProjectionMaintenance.compactEventStore")(function* (
       betweenPages: Effect.Effect<void> = Effect.void,
     ) {
       const bounds = yield* sql<{
