@@ -211,7 +211,10 @@ export class VcsStatusBroadcaster extends Context.Service<
     readonly refreshLocalStatus: (
       cwd: string,
     ) => Effect.Effect<VcsStatusLocalResult, GitManagerServiceError>;
-    readonly refreshStatus: (cwd: string) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
+    readonly refreshStatus: (
+      cwd: string,
+      options?: { readonly localOnly?: boolean },
+    ) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
     readonly refreshPullRequestStatus: (
       cwd: string,
     ) => Effect.Effect<VcsStatusRemoteResult | null, GitManagerServiceError>;
@@ -479,9 +482,27 @@ export const make = Effect.gen(function* () {
 
   const refreshStatus: VcsStatusBroadcaster["Service"]["refreshStatus"] = Effect.fn(
     "VcsStatusBroadcaster.refreshStatus",
-  )(function* (rawCwd) {
+  )(function* (rawCwd, options) {
     const cwd = yield* withFileSystem(normalizeCwd(rawCwd));
-    yield* refreshLocalStatusCore(cwd);
+    const previous = options?.localOnly ? yield* getCachedStatus(cwd) : null;
+    const local = yield* refreshLocalStatusCore(cwd);
+    if (options?.localOnly) {
+      return yield* withRemoteWriteLock(
+        cwd,
+        Effect.gen(function* () {
+          if (previous?.local?.value.refName !== local.refName || !previous?.remote) {
+            yield* workflow.invalidateRemoteStatus(cwd);
+            yield* updateCachedRemoteStatus(
+              cwd,
+              { branch: local.refName, fingerprint: fingerprintStatusPart(null), value: null },
+              { publish: true },
+            );
+          }
+          const parts = yield* getStatusParts(cwd);
+          return mergeGitStatusParts(parts.local, parts.remote);
+        }),
+      );
+    }
     return yield* withRemoteWriteLock(
       cwd,
       Effect.gen(function* () {
