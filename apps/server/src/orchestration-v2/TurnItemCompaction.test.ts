@@ -264,7 +264,7 @@ it.effect(
       SELECT COUNT(*) AS rows, COALESCE(SUM(octet_length(payload_json)), 0) AS payload_bytes
       FROM orchestration_events WHERE stream_id = ${threadId}
     `;
-      const summary = yield* maintenance.compactEventStore;
+      const summary = yield* maintenance.compactEventStore();
       const replay = yield* eventStore.read({ threadId }).pipe(Stream.runCollect);
       const expectedIds = new Set([
         "event:turn-item-compaction:thread",
@@ -439,10 +439,12 @@ it.effect("keeps post-bound appends visible during compaction", () =>
         }
         return Effect.succeed(statement);
       };
-      const compaction = yield* maintenance.compactEventStore.pipe(
-        Effect.provideService(Statement.CurrentTransformer, blockFirstScanPage),
-        Effect.forkScoped,
-      );
+      const compaction = yield* maintenance
+        .compactEventStore()
+        .pipe(
+          Effect.provideService(Statement.CurrentTransformer, blockFirstScanPage),
+          Effect.forkScoped,
+        );
       yield* Deferred.await(scanStarted);
       const snapshots = [3, 4, 5].map((revision) =>
         itemEvent(
@@ -473,7 +475,7 @@ it.effect("keeps post-bound appends visible during compaction", () =>
         firstPassRows.map((stored) => stored.sequence),
         [initial[1]!.sequence, beforeSequence, ...appended.map((stored) => stored.sequence)],
       );
-      yield* maintenance.compactEventStore;
+      yield* maintenance.compactEventStore();
       const secondPassRows = yield* eventStore
         .read({ threadId, eventType: "turn-item.updated" })
         .pipe(Stream.runCollect);
