@@ -161,7 +161,7 @@ describe("DesktopConnectionCatalogStore", () => {
             yield* fs.makeDirectory(legacyProfile, { recursive: true });
             yield* fs.writeFileString(path.join(legacyProfile, "Cookies"), "shared cookies");
             const paths = new Map<string, string>();
-            // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- Clerk must set both profiles and register its bridge synchronously before Electron is ready.
+            /* oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- Assert synchronous pre-ready initialization. */ // @effect-diagnostics-next-line runEffectInsideEffect:off - Clerk must initialize synchronously before Electron is ready.
             Effect.runSync(
               DesktopClerk.make.pipe(
                 Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
