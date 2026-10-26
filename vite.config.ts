@@ -216,6 +216,12 @@ export default defineConfig({
       perf: "warn",
     },
     rules: {
+      "eslint/no-new": "error",
+      "unicorn/no-useless-spread": "error",
+      "eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
+      ],
       "eslint/no-unsafe-optional-chaining": "error",
       "eslint/no-unneeded-ternary": "error",
       "unicorn/no-useless-fallback-in-spread": "error",
