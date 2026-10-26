@@ -458,13 +458,12 @@ function createFakeSourceControlProvider(scenario: FakeProviderScenario = {}): {
               []
             ).map(toChangeRequest),
           ),
-          Effect.flatMap((requests) =>
+          Effect.tap(() =>
             scenario.prListGate
               ? Deferred.succeed(scenario.prListGate.started, undefined).pipe(
                   Effect.andThen(Deferred.await(scenario.prListGate.release)),
-                  Effect.as(requests),
                 )
-              : Effect.succeed(requests),
+              : Effect.void,
           ),
         ),
       createChangeRequest: (input) =>

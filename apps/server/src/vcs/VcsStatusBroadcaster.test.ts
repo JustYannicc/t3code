@@ -110,10 +110,8 @@ function layerTestFor(state: {
                   return state.currentRemoteStatus;
                 }),
               ),
-              Effect.flatMap((remote) =>
-                state.remoteStatusError
-                  ? Effect.fail(state.remoteStatusError)
-                  : Effect.succeed(remote),
+              Effect.tap(() =>
+                state.remoteStatusError ? Effect.fail(state.remoteStatusError) : Effect.void,
               ),
             );
           }),
