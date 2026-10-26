@@ -81,8 +81,8 @@ export const make = Effect.gen(function* () {
             try: () => Electron.safeStorage.isEncryptionAvailable(),
             catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
           }),
-    encryptString: (value) =>
-      platform === "darwin"
+    encryptString: Effect.fn("ElectronSafeStorage.encryptString")(function (value) {
+      return platform === "darwin"
         ? Effect.tryPromise({
             try: () => Electron.safeStorage.encryptStringAsync(value),
             catch: (cause) => new ElectronSafeStorageEncryptError({ cause }),
@@ -90,9 +90,10 @@ export const make = Effect.gen(function* () {
         : Effect.try({
             try: () => Electron.safeStorage.encryptString(value),
             catch: (cause) => new ElectronSafeStorageEncryptError({ cause }),
-          }),
-    decryptString: (value) =>
-      platform === "darwin"
+          });
+    }),
+    decryptString: Effect.fn("ElectronSafeStorage.decryptString")(function (value) {
+      return platform === "darwin"
         ? Effect.tryPromise({
             try: () => Electron.safeStorage.decryptStringAsync(Buffer.from(value)),
             catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
@@ -100,7 +101,8 @@ export const make = Effect.gen(function* () {
         : Effect.try({
             try: () => Electron.safeStorage.decryptString(Buffer.from(value)),
             catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
-          }),
+          });
+    }),
     selectedStorageBackend: Effect.sync(() => {
       if (platform !== "linux") {
         return Option.none();
