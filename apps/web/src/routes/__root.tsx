@@ -226,12 +226,8 @@ function RootRouteErrorView({ error }: ErrorComponentProps) {
   const report = errorReport(error, pathname);
 
   return (
-    <StandalonePage tone="error">
-      <StandalonePageHeader
-        eyebrow={APP_DISPLAY_NAME}
-        title="Something went wrong."
-        description={message}
-      />
+    <StandalonePage>
+      <StandalonePageHeader title="Something went wrong." description={message} />
 
       <div className="mt-5 flex flex-wrap gap-2">
         <Button size="sm" onClick={() => void router.invalidate()}>
@@ -370,6 +366,7 @@ function EventRouter({
     })().catch(() => undefined);
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- expands the bootstrap project in the UI store and navigates the router on a server welcome
   useEffect(() => {
     handleWelcome(serverWelcome);
   }, [serverWelcome]);
