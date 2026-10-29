@@ -32,6 +32,7 @@ function ensureExecutable(filePath) {
   }
 }
 
+// Written through a rename so a concurrent reader never sees a partial file.
 function repairPathFile(electronDir, platformPath) {
   const pathFile = NodePath.join(electronDir, "path.txt");
   const currentPath = NodeFS.existsSync(pathFile)
@@ -39,7 +40,9 @@ function repairPathFile(electronDir, platformPath) {
     : undefined;
 
   if (currentPath !== platformPath) {
-    NodeFS.writeFileSync(pathFile, platformPath);
+    const tempPath = `${pathFile}.${process.pid}`;
+    NodeFS.writeFileSync(tempPath, platformPath);
+    NodeFS.renameSync(tempPath, pathFile);
   }
 }
 
@@ -116,14 +119,15 @@ function runChecked(command, args) {
   );
 }
 
-// electron's own installer goes through @electron/get, which reuses its
-// download cache (~/.cache/electron, ~/Library/Caches/electron) and verifies
-// the bundled checksums. pnpm 11 never runs it because electron has no
-// install script, so a new worktree would otherwise download 130 MB again.
-function installFromElectronCache(electronDir) {
+// Reuse Electron's verified download cache. Its installer extracts beside itself,
+// so run a private copy that can still resolve dependencies from electronDir.
+function installFromElectronCache(electronDir, stageDir) {
+  for (const file of ["install.js", "package.json", "checksums.json"]) {
+    NodeFS.copyFileSync(NodePath.join(electronDir, file), NodePath.join(stageDir, file));
+  }
   const result = NodeChildProcess.spawnSync(
     process.execPath,
-    [NodePath.join(electronDir, "install.js")],
+    [NodePath.join(stageDir, "install.js")],
     { stdio: ["ignore", "inherit", "inherit"] },
   );
   if (result.status === 0) {
@@ -135,7 +139,7 @@ function installFromElectronCache(electronDir) {
   return false;
 }
 
-function downloadElectronRuntime(electronDir, version) {
+function downloadElectronRuntime(stageDir, version) {
   const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-electron-"));
   const zipPath = NodePath.join(tempDir, `electron-v${version}-${hostPlatform}-${hostArch}.zip`);
 
@@ -154,13 +158,13 @@ function downloadElectronRuntime(electronDir, version) {
       zipPath,
     ]);
     if (hostPlatform === "darwin") {
-      runChecked("ditto", ["-x", "-k", zipPath, NodePath.join(electronDir, "dist")]);
+      runChecked("ditto", ["-x", "-k", zipPath, NodePath.join(stageDir, "dist")]);
     } else {
       runChecked("python3", [
         "-c",
         "import os, sys, zipfile; os.makedirs(sys.argv[2], exist_ok=True); zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])",
         zipPath,
-        NodePath.join(electronDir, "dist"),
+        NodePath.join(stageDir, "dist"),
       ]);
     }
   } finally {
@@ -168,9 +172,65 @@ function downloadElectronRuntime(electronDir, version) {
   }
 }
 
-function resetRuntime(electronDir) {
-  NodeFS.rmSync(NodePath.join(electronDir, "dist"), { recursive: true, force: true });
-  NodeFS.rmSync(NodePath.join(electronDir, "path.txt"), { force: true });
+function lockOwnerIsGone(lockDir) {
+  let pid;
+  try {
+    pid = Number(NodeFS.readFileSync(NodePath.join(lockDir, "pid"), "utf8"));
+  } catch {
+    // The owner writes its pid right after mkdir; only an old lock lacks one.
+    try {
+      return Date.now() - NodeFS.statSync(lockDir).mtimeMs > 10_000;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return error.code === "ESRCH";
+  }
+}
+
+function withPublishLock(electronDir, fn) {
+  const lockDir = NodePath.join(electronDir, ".t3-publish.lock");
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      NodeFS.mkdirSync(lockDir);
+      NodeFS.writeFileSync(NodePath.join(lockDir, "pid"), String(process.pid));
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      if (lockOwnerIsGone(lockDir)) {
+        NodeFS.rmSync(lockDir, { recursive: true, force: true });
+      } else {
+        Atomics.wait(pause, 0, 0, 100);
+      }
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    NodeFS.rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
+// Worktrees share electronDir. Extract privately, then check and publish under
+// the lock so a concurrent repair cannot move another installer's valid dist.
+function publishRuntime(electronDir, stageDir, isValid) {
+  const distPath = NodePath.join(electronDir, "dist");
+  withPublishLock(electronDir, () => {
+    if (isValid()) {
+      return;
+    }
+    try {
+      NodeFS.renameSync(distPath, NodePath.join(stageDir, "broken-dist"));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    NodeFS.renameSync(NodePath.join(stageDir, "dist"), distPath);
+  });
 }
 
 export function ensureElectronRuntime() {
@@ -179,15 +239,20 @@ export function ensureElectronRuntime() {
   const electronDir = NodePath.dirname(electronPackageJsonPath);
   const platformPath = getPlatformPath();
   const electronPath = NodePath.join(electronDir, "dist", platformPath);
-  const needsInstall = () =>
-    missingRuntimePaths(electronDir, platformPath).length > 0 ||
-    invalidRuntimePaths(electronDir, platformPath).length > 0;
+  const runtimeIsValid = (dir) =>
+    missingRuntimePaths(dir, platformPath).length === 0 &&
+    invalidRuntimePaths(dir, platformPath).length === 0;
 
-  if (needsInstall()) {
-    resetRuntime(electronDir);
-    if (!installFromElectronCache(electronDir) || needsInstall()) {
-      resetRuntime(electronDir);
-      downloadElectronRuntime(electronDir, electronPackageJson.version);
+  if (!runtimeIsValid(electronDir)) {
+    const stageDir = NodeFS.mkdtempSync(NodePath.join(electronDir, ".t3-install-"));
+    try {
+      if (!installFromElectronCache(electronDir, stageDir) || !runtimeIsValid(stageDir)) {
+        NodeFS.rmSync(NodePath.join(stageDir, "dist"), { recursive: true, force: true });
+        downloadElectronRuntime(stageDir, electronPackageJson.version);
+      }
+      publishRuntime(electronDir, stageDir, () => runtimeIsValid(electronDir));
+    } finally {
+      NodeFS.rmSync(stageDir, { recursive: true, force: true });
     }
   }
 
