@@ -356,8 +356,11 @@ packageExtensions:
     dependencies:
       vite-plus: "catalog:"
   "alchemy@2.0.0-beta.84":
-    dependencies:
+    peerDependencies:
       vite-plus: "catalog:"
+    peerDependenciesMeta:
+      vite-plus:
+        optional: true
   # Navigation types import these without declaring them as direct dependencies.
   "@react-navigation/native-stack@*":
     dependencies:

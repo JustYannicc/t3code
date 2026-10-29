@@ -353,7 +353,7 @@ overrides:
   vite-plus: 1.4.0
   yaml: ^2.9.0
 
-packageExtensionsChecksum: sha256-/xRgbRCWcPM8ZkBpD166o8L2dF1Lh4lhAo5AS4KVpWc=
+packageExtensionsChecksum: sha256-1Rx+5FNohVNGy6yNTdNxupnYSgtPydjzqHWaQ/nNVNc=
 
 pnpmfileChecksum: sha256-STsbxG7+RxOFI611PrDEj1TonJgqKKllY9hYCFMLYiU=
 
@@ -1302,16 +1302,16 @@ importers:
     dependencies:
       '@alchemy.run/axiom':
         specifier: 'catalog:'
-        version: 2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)
+        version: 2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)
       '@alchemy.run/cloudflare':
         specifier: 'catalog:'
-        version: 2.0.0-beta.84(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@effect/sql-pg@4.0.5(effect@4.0.5))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)
+        version: 2.0.0-beta.84(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@effect/sql-pg@4.0.5(effect@4.0.5))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)
       '@alchemy.run/drizzle':
         specifier: 'catalog:'
-        version: 2.0.0-beta.84(3c6f3bf0283a5235eb33466bc560e10d)
+        version: 2.0.0-beta.84(bd9f7ef06a5ccba3f140aae4b61fca25)
       '@alchemy.run/planetscale':
         specifier: 'catalog:'
-        version: 2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)
+        version: 2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)
       '@clerk/backend':
         specifier: 3.25.0
         version: 3.25.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
@@ -1341,7 +1341,7 @@ importers:
         version: link:../../packages/shared
       alchemy:
         specifier: 2.0.0-beta.84
-        version: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479)
+        version: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3)
       drizzle-orm:
         specifier: 1.0.0-rc.5-ab785fc
         version: 1.0.0-rc.5-ab785fc(@cloudflare/workers-types@4.20260604.1)(@effect/sql-d1@4.0.6(effect@4.0.5))(@effect/sql-pg@4.0.5(effect@4.0.5))(@effect/sql-sqlite-bun@4.0.0-rc.112(effect@4.0.5))(@effect/sql-sqlite-do@4.0.5(effect@4.0.5))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.3(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/sql.js@1.4.11)(bun-types@1.3.14)(effect@4.0.5)(expo-sqlite@58.0.13(@types/react@19.3.0)(expo@58.0.14)(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0))(pg@8.23.0)(sql.js@1.15.0)(zod@4.6.5)
@@ -1381,13 +1381,13 @@ importers:
     dependencies:
       '@alchemy.run/axiom':
         specifier: 'catalog:'
-        version: 2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)
+        version: 2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)
       '@alchemy.run/cloudflare':
         specifier: 'catalog:'
-        version: 2.0.0-beta.84(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@effect/sql-pg@4.0.5(effect@4.0.5))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)
+        version: 2.0.0-beta.84(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@effect/sql-pg@4.0.5(effect@4.0.5))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)
       alchemy:
         specifier: 2.0.0-beta.84
-        version: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479)
+        version: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3)
       effect:
         specifier: 4.0.5
         version: 4.0.5
@@ -8696,9 +8696,11 @@ packages:
       '@types/effect__platform-node': '*'
       '@types/effect__vitest': '*'
       '@types/vite': '*'
+      '@types/vite-plus': '*'
       '@types/ws': 8.18.2
       effect: 4.0.5
       vite: ^8.0.7
+      vite-plus: 1.4.0
       ws: 8.22.0
     peerDependenciesMeta:
       '@alchemy.run/frontend-frameworks':
@@ -8721,9 +8723,13 @@ packages:
         optional: true
       '@types/vite':
         optional: true
+      '@types/vite-plus':
+        optional: true
       '@types/ws':
         optional: true
       vite:
+        optional: true
+      vite-plus:
         optional: true
       ws:
         optional: true
@@ -14552,17 +14558,17 @@ snapshots:
     dependencies:
       json-schema: 0.4.0
 
-  '@alchemy.run/acme@2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)':
+  '@alchemy.run/acme@2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)':
     dependencies:
       '@distilled.cloud/acme': 1.0.0-rc.17(effect@4.0.5)
-      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479)
+      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3)
       effect: 4.0.5
 
-  '@alchemy.run/axiom@2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)':
+  '@alchemy.run/axiom@2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)':
     dependencies:
       '@distilled.cloud/axiom': 1.0.0-rc.17(effect@4.0.5)
       '@distilled.cloud/core': 1.0.0-rc.17(effect@4.0.5)
-      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479)
+      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3)
       effect: 4.0.5
 
   '@alchemy.run/cloudflare-runtime@2.0.0-beta.84(@distilled.cloud/cloudflare@1.0.0-rc.17(effect@4.0.5))(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(effect@4.0.5)(rolldown@1.2.13)':
@@ -14593,18 +14599,18 @@ snapshots:
       - proxy-agent
       - typescript
 
-  '@alchemy.run/cloudflare@2.0.0-beta.84(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@effect/sql-pg@4.0.5(effect@4.0.5))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)':
+  '@alchemy.run/cloudflare@2.0.0-beta.84(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@effect/sql-pg@4.0.5(effect@4.0.5))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)':
     dependencies:
-      '@alchemy.run/acme': 2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)
+      '@alchemy.run/acme': 2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)
       '@alchemy.run/cloudflare-runtime': 2.0.0-beta.84(@distilled.cloud/cloudflare@1.0.0-rc.17(effect@4.0.5))(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(effect@4.0.5)(rolldown@1.2.13)
-      '@alchemy.run/docker': 2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)
-      '@alchemy.run/sql': 2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)
+      '@alchemy.run/docker': 2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)
+      '@alchemy.run/sql': 2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)
       '@distilled.cloud/aws4signer': 1.0.0-rc.17(effect@4.0.5)
       '@distilled.cloud/cloudflare': 1.0.0-rc.17(effect@4.0.5)
       '@distilled.cloud/core': 1.0.0-rc.17(effect@4.0.5)
       '@distilled.cloud/iceberg': 1.0.0-rc.17(effect@4.0.5)
       '@effect/sql-d1': 4.0.6(effect@4.0.5)
-      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479)
+      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3)
       effect: 4.0.5
       pathe: 2.0.3
       rolldown: 1.2.13
@@ -14635,22 +14641,22 @@ snapshots:
       - proxy-agent
       - typescript
 
-  '@alchemy.run/docker@2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)':
+  '@alchemy.run/docker@2.0.0-beta.84(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)':
     dependencies:
-      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479)
+      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3)
       effect: 4.0.5
       rolldown: 1.2.13
 
-  '@alchemy.run/drizzle@2.0.0-beta.84(3c6f3bf0283a5235eb33466bc560e10d)':
+  '@alchemy.run/drizzle@2.0.0-beta.84(bd9f7ef06a5ccba3f140aae4b61fca25)':
     dependencies:
-      '@alchemy.run/sql': 2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)
+      '@alchemy.run/sql': 2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)
       '@effect/sql-d1': 4.0.6(effect@4.0.5)
       '@effect/sql-sqlite-do': 4.0.5(effect@4.0.5)
-      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479)
+      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3)
       drizzle-orm: 1.0.0-rc.5-ab785fc(@cloudflare/workers-types@4.20260604.1)(@effect/sql-d1@4.0.6(effect@4.0.5))(@effect/sql-pg@4.0.5(effect@4.0.5))(@effect/sql-sqlite-bun@4.0.0-rc.112(effect@4.0.5))(@effect/sql-sqlite-do@4.0.5(effect@4.0.5))(@electric-sql/pglite@0.3.15)(@libsql/client@0.17.3(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/sql.js@1.4.11)(bun-types@1.3.14)(effect@4.0.5)(expo-sqlite@58.0.13(@types/react@19.3.0)(expo@58.0.14)(react-native@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.0(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0))(pg@8.23.0)(sql.js@1.15.0)(zod@4.6.5)
       effect: 4.0.5
     optionalDependencies:
-      '@alchemy.run/cloudflare': 2.0.0-beta.84(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@effect/sql-pg@4.0.5(effect@4.0.5))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)
+      '@alchemy.run/cloudflare': 2.0.0-beta.84(@effect/platform-node@4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6))(@effect/sql-pg@4.0.5(effect@4.0.5))(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@types/yauzl@3.4.0)(@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)
       '@effect/sql-pg': 4.0.5(effect@4.0.5)
       drizzle-kit: 1.0.0-rc.5-ab785fc
     transitivePeerDependencies:
@@ -14664,12 +14670,12 @@ snapshots:
       chokidar: 5.0.0
       rolldown: 1.2.13
 
-  '@alchemy.run/planetscale@2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)':
+  '@alchemy.run/planetscale@2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)':
     dependencies:
-      '@alchemy.run/sql': 2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)
+      '@alchemy.run/sql': 2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)
       '@distilled.cloud/core': 1.0.0-rc.17(effect@4.0.5)
       '@distilled.cloud/planetscale': 1.0.0-rc.17(effect@4.0.5)
-      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479)
+      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3)
       effect: 4.0.5
     optionalDependencies:
       pg: 8.23.0
@@ -14686,9 +14692,9 @@ snapshots:
       '@types/react': 19.3.0
       react-devtools-core: 6.1.5(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
-  '@alchemy.run/sql@2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479))(effect@4.0.5)(pg@8.23.0)':
+  '@alchemy.run/sql@2.0.0-beta.84(@effect/sql-pg@4.0.5(effect@4.0.5))(alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3))(effect@4.0.5)(pg@8.23.0)':
     dependencies:
-      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479)
+      alchemy: 2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3)
       effect: 4.0.5
     optionalDependencies:
       '@effect/sql-pg': 4.0.5(effect@4.0.5)
@@ -19614,7 +19620,7 @@ snapshots:
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
-  alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(0b2795af5ab2a7121b0eb956c3b68479):
+  alchemy@2.0.0-beta.84(patch_hash=824006659fa28ca31e490ce1fc3611f77436005ce9fa0f638be46564133cf042)(ba61884f5ad09a2d726cbeb85edf27a3):
     dependencies:
       '@alchemy.run/node-utils': 2.0.0-beta.84
       '@alchemy.run/sigil': 0.1.0-alpha.1(@types/react@19.3.0)(react-devtools-core@6.1.5(bufferutil@4.1.0)(utf-8-validate@6.0.6))
@@ -19625,94 +19631,19 @@ snapshots:
       picomatch: 4.0.7
       rolldown: 1.2.13
       tinyglobby: 0.2.17
-      vite-plus: 1.4.0(@astrojs/compiler-rs@0.5.1)(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@vitest/browser-playwright@5.0.5)(@vitest/ui@5.0.5)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(bufferutil@4.1.0)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(playwright@1.60.0)(terser@5.48.0)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
       yaml: 2.9.0
     optionalDependencies:
       '@effect/platform-node': 4.0.5(bufferutil@4.1.0)(effect@4.0.5)(redis@6.2.1)(utf-8-validate@6.0.6)
       '@effect/vitest': 4.0.5(patch_hash=2731c9c3761c595f25ddc625a7d61ca376b389d5b3049ecb837c8940f21cfa02)(@astrojs/compiler-rs@0.5.1)(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@vitest/browser-playwright@5.0.5)(@vitest/ui@5.0.5)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(bufferutil@4.1.0)(effect@4.0.5)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(playwright@1.60.0)(terser@5.48.0)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
       '@types/ws': 8.18.2
       vite: '@voidzero-dev/vite-plus-core@1.4.0(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(esbuild@0.28.2)(jiti@2.7.0)(terser@5.48.0)(unrun@0.2.39)(yaml@2.9.0)'
+      vite-plus: 1.4.0(@astrojs/compiler-rs@0.5.1)(@tsc-rs/typescript@0.8.0)(@types/node@24.12.4)(@vitest/browser-playwright@5.0.5)(@vitest/ui@5.0.5)(@volar/typescript@2.4.28(@tsc-rs/typescript@0.8.0))(bufferutil@4.1.0)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(playwright@1.60.0)(terser@5.48.0)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
       ws: 8.22.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     transitivePeerDependencies:
-      - '@arethetypeswrong/core'
-      - '@astrojs/compiler-rs'
-      - '@edge-runtime/vm'
-      - '@opentelemetry/api'
-      - '@types/arethetypeswrong__core'
-      - '@types/astrojs__compiler-rs'
-      - '@types/bufferutil'
-      - '@types/edge-runtime__vm'
-      - '@types/esbuild'
-      - '@types/happy-dom'
-      - '@types/jiti'
-      - '@types/jsdom'
-      - '@types/less'
-      - '@types/msw'
-      - '@types/node'
-      - '@types/opentelemetry__api'
-      - '@types/oxlint-tsgolint'
       - '@types/picomatch'
-      - '@types/playwright'
-      - '@types/publint'
       - '@types/react'
       - '@types/react-devtools-core'
-      - '@types/sass'
-      - '@types/sass-embedded'
-      - '@types/stylus'
-      - '@types/sugarss'
-      - '@types/svelte'
-      - '@types/terser'
-      - '@types/testing-library__dom'
-      - '@types/tsx'
-      - '@types/typescript'
-      - '@types/typescript__native-preview'
-      - '@types/unplugin-unused'
-      - '@types/unrun'
-      - '@types/utf-8-validate'
-      - '@types/vite-plus'
-      - '@types/vitejs__devtools'
-      - '@types/vitest'
-      - '@types/vitest__browser-playwright'
-      - '@types/vitest__browser-preview'
-      - '@types/vitest__browser-webdriverio'
-      - '@types/vitest__coverage-istanbul'
-      - '@types/vitest__coverage-v8'
-      - '@types/vitest__ui'
-      - '@types/volar__typescript'
-      - '@types/vue-tsc'
-      - '@types/vue__language-core'
-      - '@types/yaml'
-      - '@typescript/native-preview'
-      - '@vitejs/devtools'
-      - '@vitest/browser-playwright'
-      - '@vitest/browser-webdriverio'
-      - '@vitest/coverage-istanbul'
-      - '@vitest/coverage-v8'
-      - '@vitest/ui'
-      - '@volar/typescript'
-      - '@vue/language-core'
-      - bufferutil
-      - esbuild
-      - happy-dom
-      - jiti
-      - jsdom
-      - less
-      - msw
-      - playwright
-      - publint
       - react-devtools-core
-      - sass
-      - sass-embedded
-      - stylus
-      - sugarss
-      - svelte
-      - terser
-      - tsx
-      - typescript
-      - unplugin-unused
-      - unrun
-      - utf-8-validate
-      - vue-tsc
 
   alien-signals@2.0.6: {}
 
