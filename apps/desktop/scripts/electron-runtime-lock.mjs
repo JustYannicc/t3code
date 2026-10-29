@@ -3,10 +3,16 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 function removeOwner(lockDir, owner) {
-  try {
-    NodeFS.unlinkSync(NodePath.join(lockDir, owner));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      NodeFS.unlinkSync(NodePath.join(lockDir, owner));
+      break;
+    } catch (error) {
+      if (error.code === "ENOENT") break;
+      if (!["EPERM", "EBUSY"].includes(error.code) || attempt === 3) throw error;
+      Atomics.wait(pause, 0, 0, 100);
+    }
   }
   removeEmptyLock(lockDir);
 }

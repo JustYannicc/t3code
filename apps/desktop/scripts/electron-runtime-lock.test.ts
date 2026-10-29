@@ -35,6 +35,32 @@ withPublishLock(dir, () => {
 });
 `;
 
+const RELEASE = `
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import path from 'node:path';
+import { withPublishLock } from ${JSON.stringify(new URL("./electron-runtime-lock.mjs", import.meta.url).href)};
+const [directory, code, failures, expectedAttempts] = process.argv.slice(1);
+const unlink = fs.unlinkSync;
+const fault = Object.assign(new Error('claim is busy'), { code });
+let attempts = 0;
+fs.unlinkSync = target => {
+  if (path.basename(target).startsWith('owner-') && ++attempts <= Number(failures)) throw fault;
+  return unlink(target);
+};
+syncBuiltinESMExports();
+let thrown;
+try {
+  assert.equal(withPublishLock(directory, () => 'published'), 'published');
+} catch (error) {
+  thrown = error;
+}
+assert.equal(thrown, Number(failures) >= Number(expectedAttempts) ? fault : undefined);
+assert.equal(attempts, Number(expectedAttempts));
+if (!thrown) assert.deepEqual(fs.readdirSync(directory), []);
+`;
+
 const contender = Effect.fn("test.electronLockContender")((directory: string, stalePid: number) =>
   Effect.acquireRelease(
     Effect.sync(() => {
@@ -122,6 +148,40 @@ it.live("does not evict a fresh publisher after observing an old dead lock", () 
       withPublishLock(directory, () => NodeFS.writeFileSync(published, "ready"));
       NodeAssert.equal(NodeFS.readFileSync(published, "utf8"), "ready");
       NodeAssert.deepEqual(NodeFS.readdirSync(directory), ["published"]);
+    }),
+  ),
+);
+
+it.live("retries transient claim removal errors and propagates persistent failures", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.sync(() => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "electron-lock-"))),
+        (root) => Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true })),
+      );
+      for (const [code, failures, attempts] of [
+        ["EPERM", 2, 3],
+        ["EBUSY", 2, 3],
+        ["EPERM", 100, 4],
+        ["EBUSY", 100, 4],
+        ["EACCES", 100, 1],
+      ]) {
+        const root = NodeFS.mkdtempSync(NodePath.join(directory, "case-"));
+        const result = NodeChildProcess.spawnSync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "--eval",
+            RELEASE,
+            root,
+            String(code),
+            String(failures),
+            String(attempts),
+          ],
+          { encoding: "utf8" },
+        );
+        NodeAssert.equal(result.status, 0, result.stderr);
+      }
     }),
   ),
 );
