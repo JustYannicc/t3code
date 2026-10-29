@@ -350,9 +350,12 @@ packageExtensions:
   "@clerk/expo-native-components@*":
     dependencies:
       "@expo/config-plugins": 58.0.9
-  # Our patch makes @effect/vitest import vite-plus/test. A catalog: spec here
+  # Our test patches import vite-plus/test. A catalog: spec here
   # resolves through the vite-plus override above.
   "@effect/vitest@*":
+    dependencies:
+      vite-plus: "catalog:"
+  "alchemy@2.0.0-beta.84":
     dependencies:
       vite-plus: "catalog:"
   # Navigation types import these without declaring them as direct dependencies.
