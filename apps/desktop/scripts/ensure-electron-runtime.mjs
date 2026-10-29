@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as NodeChildProcess from "node:child_process";
+import { withPublishLock } from "./electron-runtime-lock.mjs";
 
 const require = NodeModule.createRequire(import.meta.url);
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone repair script has no Effect runtime.
@@ -169,50 +170,6 @@ function downloadElectronRuntime(stageDir, version) {
     }
   } finally {
     NodeFS.rmSync(tempDir, { recursive: true, force: true });
-  }
-}
-
-function lockOwnerIsGone(lockDir) {
-  let pid;
-  try {
-    pid = Number(NodeFS.readFileSync(NodePath.join(lockDir, "pid"), "utf8"));
-  } catch {
-    // The owner writes its pid right after mkdir; only an old lock lacks one.
-    try {
-      return Date.now() - NodeFS.statSync(lockDir).mtimeMs > 10_000;
-    } catch {
-      return false;
-    }
-  }
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return error.code === "ESRCH";
-  }
-}
-
-function withPublishLock(electronDir, fn) {
-  const lockDir = NodePath.join(electronDir, ".t3-publish.lock");
-  const pause = new Int32Array(new SharedArrayBuffer(4));
-  for (;;) {
-    try {
-      NodeFS.mkdirSync(lockDir);
-      NodeFS.writeFileSync(NodePath.join(lockDir, "pid"), String(process.pid));
-      break;
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      if (lockOwnerIsGone(lockDir)) {
-        NodeFS.rmSync(lockDir, { recursive: true, force: true });
-      } else {
-        Atomics.wait(pause, 0, 0, 100);
-      }
-    }
-  }
-  try {
-    return fn();
-  } finally {
-    NodeFS.rmSync(lockDir, { recursive: true, force: true });
   }
 }
 
