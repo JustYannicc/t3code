@@ -188,7 +188,7 @@ describe("DesktopConnectionCatalogStore", () => {
                 Effect.scoped,
               ),
             );
-            assert.deepEqual(clerkStorage.mock.lastCall, [{ path: tokens }]);
+            assert.deepEqual(clerkStorage.mock.lastCall, [{ path: path.join(tokens, "clerk") }]);
             assert.equal(
               yield* fs.readFileString(path.join(legacyProfile, "Cookies")),
               "shared cookies",
