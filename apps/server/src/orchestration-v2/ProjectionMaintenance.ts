@@ -260,7 +260,8 @@ export const layer: Layer.Layer<
           COALESCE((SELECT MAX(sequence) FROM orchestration_events), 0) AS event_sequence,
           COALESCE((SELECT MAX(rowid) FROM orchestration_command_receipts), 0) AS receipt_row_id
       `.pipe(NodeSqliteClient.readOnly);
-      let throughSequence = bounds[0]?.event_sequence ?? 0;
+      const initialHighWater = bounds[0]?.event_sequence ?? 0;
+      let throughSequence = initialHighWater;
       let throughReceiptRowId = bounds[0]?.receipt_row_id ?? 0;
       // Older doctor builds without migration 77 can compact only superseded history.
       const retentionCutoff = (yield* hasReplayFloorTable)
@@ -268,6 +269,7 @@ export const layer: Layer.Layer<
             DateTime.subtractDuration(yield* DateTime.now, EVENT_HISTORY_RETENTION),
           )
         : "";
+      const retainedPromptSequences = new Set<number>();
       const newestStreamKeys = new Set<string>();
       const retainedThreadIds = new Set<string>();
       const retainedReadStateThreadIds = new Set<string>();
@@ -287,6 +289,7 @@ export const layer: Layer.Layer<
           readonly imported_legacy_thread: number;
           readonly expired: number;
           readonly retention_anchor: number;
+          readonly prompt_sequence: number | null;
         }>`
           SELECT
             event.sequence,
@@ -295,6 +298,9 @@ export const layer: Layer.Layer<
             event.stream_id,
             event.event_type,
             event.occurred_at < ${retentionCutoff} AS expired,
+            CASE WHEN event.event_type IN ('subagent.updated', 'turn-item.updated')
+              THEN json_extract(event.payload_json, '$.promptSequence')
+              ELSE NULL END AS prompt_sequence,
             CASE
               WHEN event.occurred_at >= ${retentionCutoff} THEN 0
               WHEN event.command_id IS NOT NULL AND EXISTS (
@@ -308,10 +314,6 @@ export const layer: Layer.Layer<
               ) THEN 1
               WHEN event.event_type = 'run.updated'
                 AND json_extract(event.payload_json, '$.status') = 'running'
-              THEN 1
-              WHEN event.event_type IN ('subagent.updated', 'turn-item.updated')
-                AND json_type(event.payload_json, '$.prompt') = 'text'
-                AND json_type(event.payload_json, '$.promptSequence') IS NULL
               THEN 1
               ELSE 0
             END AS retention_anchor,
@@ -355,6 +357,7 @@ export const layer: Layer.Layer<
           if (
             row.expired === 1 &&
             row.retention_anchor === 0 &&
+            !retainedPromptSequences.has(row.sequence) &&
             row.application_event_version === 2 &&
             row.aggregate_kind === "thread" &&
             !isNewestInStream &&
@@ -365,6 +368,7 @@ export const layer: Layer.Layer<
             if (!replayFloors.has(row.stream_id)) replayFloors.set(row.stream_id, row.sequence);
             continue;
           }
+          if (row.prompt_sequence !== null) retainedPromptSequences.add(row.prompt_sequence);
           if (row.imported_legacy_thread === 1) {
             obsolete.push(row.sequence);
           } else if (row.application_event_version === 2) {
@@ -412,7 +416,25 @@ export const layer: Layer.Layer<
           // Replay readers must see a deletion and its floor from the same commit.
           yield* sql.withTransaction(
             Effect.gen(function* () {
-              yield* sql`DELETE FROM orchestration_events WHERE sequence IN ${sql.in(obsolete)}`;
+              // A writer can add a prompt reference after the read page was released.
+              const deleted = yield* sql<{ sequence: number }>`
+                DELETE FROM orchestration_events AS candidate
+                WHERE sequence IN ${sql.in(obsolete)}
+                  AND NOT (
+                    candidate.event_type IN ('subagent.updated', 'turn-item.updated')
+                    AND COALESCE(json_type(candidate.payload_json, '$.prompt') = 'text', 0)
+                    AND json_type(candidate.payload_json, '$.promptSequence') IS NULL
+                    AND EXISTS (
+                      SELECT 1 FROM orchestration_events AS reference
+                      WHERE reference.sequence > ${initialHighWater}
+                        AND reference.stream_id = candidate.stream_id
+                        AND reference.event_type = candidate.event_type
+                        AND json_extract(reference.payload_json, '$.promptSequence') = candidate.sequence
+                    )
+                  )
+                RETURNING sequence
+              `;
+              deletedEventCount += deleted.length;
               for (const [threadId, floor] of replayFloors) {
                 yield* sql`
                   INSERT INTO orchestration_v2_event_retention (thread_id, replay_floor)
@@ -423,7 +445,7 @@ export const layer: Layer.Layer<
               }
             }),
           );
-          deletedEventCount += obsolete.length;
+
           yield* Effect.yieldNow;
         }
         throughSequence =

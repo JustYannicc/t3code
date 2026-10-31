@@ -138,6 +138,7 @@ it.effect("retention keeps replay anchors and leaves project and thread projecti
     const recentAt = yield* DateTime.now;
     yield* sink.write({
       events: [
+        ...promptEvents(anchoredThreadId, recentAt, 3),
         visitedEvent(anchoredThread, "recent", recentAt),
         visitedEvent(importingThread, "recent", recentAt),
         visitedEvent({ ...archivedThread, archivedAt: oldAt }, "recent", recentAt),
@@ -163,6 +164,16 @@ it.effect("retention keeps replay anchors and leaves project and thread projecti
     ]) {
       assert.include(anchoredIds, id);
     }
+    for (const suffix of ["subagent:0", "subagent-item:0"]) {
+      assert.notInclude(anchoredIds, `event:thread:retention-anchors:${suffix}`);
+    }
+    const compressedPrompt = anchored.find(
+      (stored) => stored.event.id === "event:thread:retention-anchors:subagent:3",
+    )?.event;
+    assert.equal(
+      compressedPrompt?.type === "subagent.updated" ? compressedPrompt.payload.prompt : null,
+      "Prompt B. ".repeat(40),
+    );
     const fullPrompt = anchored.find(
       (stored) => stored.event.id === "event:thread:retention-anchors:subagent:1",
     )?.event;
