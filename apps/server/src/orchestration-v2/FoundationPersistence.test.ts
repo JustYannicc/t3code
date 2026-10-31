@@ -930,18 +930,19 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
       const providerTurnEvent = (
         suffix: string,
         usedTokens: number | null,
+        providerTurnId = "provider-turn:foundation-compact",
       ): OrchestrationV2DomainEvent => ({
         id: EventId.make(`event:foundation-compact:${suffix}`),
         type: "provider-turn.updated",
         threadId,
         occurredAt: now,
         payload: {
-          id: ProviderTurnId.make("provider-turn:foundation-compact"),
+          id: ProviderTurnId.make(providerTurnId),
           providerThreadId: ProviderThreadId.make("provider-thread:foundation-compact"),
           nodeId,
           runAttemptId: null,
           nativeTurnRef: null,
-          ordinal: 1,
+          ordinal: providerTurnId === "provider-turn:foundation-compact" ? 1 : 2,
           status: usedTokens === null ? "completed" : "running",
           startedAt: now,
           completedAt: null,
@@ -967,6 +968,7 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
           nodeEvent("node-2", "completed"),
           itemEvent("item-2", "final"),
           providerTurnEvent("turn-2", 10),
+          providerTurnEvent("other-turn", 30, "provider-turn:foundation-compact:other"),
         ],
       });
       const providerCommandId = CommandId.make("command:foundation-compact:provider-turn");
@@ -1038,6 +1040,7 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
           "event:foundation-compact:message-2",
           "event:foundation-compact:node-2",
           "event:foundation-compact:item-2",
+          "event:foundation-compact:other-turn",
           "event:foundation-compact:turn-commanded",
           "event:foundation-compact:turn-3",
           "event:foundation-compact:turn-4",
