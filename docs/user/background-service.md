@@ -34,8 +34,7 @@ before updating; to match a remote client's version, follow
 Pass an exact version (`t3 update 0.0.42`) to pin one, `--channel nightly` to
 switch trains, or `--allow-downgrade` to move backwards. After one-day history
 cleanup has pruned events, do not downgrade to a version from before that
-cleanup; it cannot resume from the replay floor and may show incomplete
-conversation history. `preview` is a
+cleanup. An older version may show incomplete conversation history. `preview` is a
 maintainers' test train: its builds can be broken and are never offered as
 updates, so the installer and `t3 update` ask for confirmation before
 installing one.
