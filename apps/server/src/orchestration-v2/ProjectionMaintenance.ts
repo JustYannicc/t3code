@@ -349,7 +349,7 @@ export const layer: Layer.Layer<
         `.pipe(NodeSqliteClient.readOnly);
         const page = rows.slice(0, COMPACTION_PAGE_SIZE);
         const obsolete: number[] = [];
-        const replayFloors = new Map<string, number>();
+        const retentionCandidates = new Map<number, string>();
         for (const row of page) {
           const streamKey = `${row.aggregate_kind}\0${row.stream_id}`;
           const isNewestInStream = !newestStreamKeys.has(streamKey);
@@ -365,7 +365,7 @@ export const layer: Layer.Layer<
             row.event_type !== "thread.deleted"
           ) {
             obsolete.push(row.sequence);
-            if (!replayFloors.has(row.stream_id)) replayFloors.set(row.stream_id, row.sequence);
+            retentionCandidates.set(row.sequence, row.stream_id);
             continue;
           }
           if (row.prompt_sequence !== null) retainedPromptSequences.add(row.prompt_sequence);
@@ -435,6 +435,16 @@ export const layer: Layer.Layer<
                 RETURNING sequence
               `;
               deletedEventCount += deleted.length;
+              const replayFloors = new Map<string, number>();
+              for (const row of deleted) {
+                const threadId = retentionCandidates.get(row.sequence);
+                if (threadId !== undefined) {
+                  replayFloors.set(
+                    threadId,
+                    Math.max(replayFloors.get(threadId) ?? 0, row.sequence),
+                  );
+                }
+              }
               for (const [threadId, floor] of replayFloors) {
                 yield* sql`
                   INSERT INTO orchestration_v2_event_retention (thread_id, replay_floor)

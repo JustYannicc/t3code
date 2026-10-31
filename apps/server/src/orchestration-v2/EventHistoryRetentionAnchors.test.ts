@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
@@ -279,5 +280,40 @@ it.effect("retention keeps a deleted thread tombstone for old cursors", () =>
       ["event", "synchronized"],
     );
     assert.equal(resumed[0]?.kind === "event" ? resumed[0].event.type : null, "thread.deleted");
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("a prompt reference added before deletion does not advance the replay floor", () =>
+  Effect.gen(function* () {
+    const sink = yield* EventSink.EventSinkV2;
+    const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+    const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
+    const sql = yield* SqlClient.SqlClient;
+    const oldAt = yield* DateTime.now;
+    const thread = makeThread(ThreadId.make("thread:prompt-reference-race"), oldAt);
+    yield* sink.write({
+      events: [createdEvent(thread, oldAt), ...promptEvents(thread.id, oldAt, 1)],
+    });
+    yield* TestClock.adjust(Duration.hours(25));
+    const now = yield* DateTime.now;
+    yield* sink.write({ events: [visitedEvent(thread, "recent", now)] });
+    let inserted = false;
+    const addReference: Statement.Transformer = (statement) => {
+      const [query] = statement.compile();
+      if (!inserted && query.includes("DELETE FROM orchestration_events AS candidate")) {
+        inserted = true;
+        return sink
+          .write({ events: promptEvents(thread.id, now, 2) })
+          .pipe(Effect.orDie, Effect.as(statement));
+      }
+      return Effect.succeed(statement);
+    };
+    const result = yield* maintenance
+      .compactEventStore()
+      .pipe(Effect.provideService(Statement.CurrentTransformer, addReference));
+    assert.isTrue(inserted);
+    assert.equal(result.deletedEventCount, 0);
+    assert.equal(yield* applicationEvents.replayFloor(thread.id), 0);
+    assert.deepEqual(yield* sql`SELECT * FROM orchestration_v2_event_retention`, []);
   }).pipe(Effect.provide(layerTest)),
 );
