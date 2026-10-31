@@ -2,6 +2,7 @@ import { ThreadId } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -55,6 +56,8 @@ type ProjectionMetadataRow = {
 const encodeEntityKey = Schema.encodeSync(
   Schema.fromJsonString(Schema.Tuple([Schema.String, Schema.String, Schema.NullOr(Schema.String)])),
 );
+
+const EVENT_HISTORY_RETENTION = Duration.hours(24);
 
 export const layer: Layer.Layer<
   ProjectionMaintenanceV2,
@@ -113,9 +116,27 @@ export const layer: Layer.Layer<
       } satisfies ProjectionVerificationV2;
     }).pipe(sql.withTransaction);
 
+    const hasReplayFloorTable = sql<{ readonly present: number }>`
+      SELECT EXISTS (
+        SELECT 1 FROM sqlite_master
+        WHERE type = 'table' AND name = 'orchestration_v2_event_retention'
+      ) AS present
+    `.pipe(Effect.map((rows) => rows[0]?.present === 1));
+
     const rebuild = Effect.gen(function* () {
       yield* sql.withTransaction(
         Effect.gen(function* () {
+          if (yield* hasReplayFloorTable) {
+            const pruned = yield* sql<{ readonly pruned: number }>`
+              SELECT EXISTS (SELECT 1 FROM orchestration_v2_event_retention) AS pruned
+            `;
+            if (pruned[0]?.pruned === 1) {
+              // Pruned history cannot rebuild the projections that now hold its state.
+              return yield* new ProjectionMaintenanceError({
+                operation: "rebuild from pruned event history",
+              });
+            }
+          }
           const throughSequence = yield* eventStore.latestSequence();
           yield* sql`DELETE FROM orchestration_v2_projection_context_transfers`;
           yield* sql`DELETE FROM orchestration_v2_projection_context_handoffs`;
@@ -227,7 +248,7 @@ export const layer: Layer.Layer<
     // Small pages bound work on the reader worker and synchronous fallback.
     const COMPACTION_PAGE_SIZE = 50;
 
-    // Keep first/latest keyed events for replay order; page every event to bound sparse scans.
+    // Keep first/latest keyed events for replay order and page every event to bound sparse scans.
     const compactEventStore = Effect.fn("ProjectionMaintenance.compactEventStore")(function* (
       betweenPages: Effect.Effect<void> = Effect.void,
     ) {
@@ -241,6 +262,13 @@ export const layer: Layer.Layer<
       `.pipe(NodeSqliteClient.readOnly);
       let throughSequence = bounds[0]?.event_sequence ?? 0;
       let throughReceiptRowId = bounds[0]?.receipt_row_id ?? 0;
+      // Older doctor builds without migration 77 can compact only superseded history.
+      const retentionCutoff = (yield* hasReplayFloorTable)
+        ? DateTime.formatIso(
+            DateTime.subtractDuration(yield* DateTime.now, EVENT_HISTORY_RETENTION),
+          )
+        : "";
+      const newestStreamKeys = new Set<string>();
       const retainedThreadIds = new Set<string>();
       const retainedReadStateThreadIds = new Set<string>();
       // Retain each key's oldest candidate, deleting it only when an older event appears.
@@ -257,6 +285,8 @@ export const layer: Layer.Layer<
           readonly event_type: string;
           readonly entity_id: string | null;
           readonly imported_legacy_thread: number;
+          readonly expired: number;
+          readonly retention_anchor: number;
         }>`
           SELECT
             event.sequence,
@@ -264,6 +294,27 @@ export const layer: Layer.Layer<
             event.aggregate_kind,
             event.stream_id,
             event.event_type,
+            event.occurred_at < ${retentionCutoff} AS expired,
+            CASE
+              WHEN event.occurred_at >= ${retentionCutoff} THEN 0
+              WHEN event.command_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM orchestration_command_receipts AS receipt
+                WHERE receipt.command_id = event.command_id
+              ) THEN 1
+              WHEN EXISTS (
+                SELECT 1 FROM orchestration_v2_legacy_imports AS legacy_import
+                WHERE legacy_import.thread_id = event.stream_id
+                  AND legacy_import.transcript_imported_at IS NULL
+              ) THEN 1
+              WHEN event.event_type = 'run.updated'
+                AND json_extract(event.payload_json, '$.status') = 'running'
+              THEN 1
+              WHEN event.event_type IN ('subagent.updated', 'turn-item.updated')
+                AND json_type(event.payload_json, '$.prompt') = 'text'
+                AND json_type(event.payload_json, '$.promptSequence') IS NULL
+              THEN 1
+              ELSE 0
+            END AS retention_anchor,
             CASE
               WHEN event.application_event_version = 2
                 AND event.event_type IN ('message.updated', 'node.updated')
@@ -296,7 +347,24 @@ export const layer: Layer.Layer<
         `.pipe(NodeSqliteClient.readOnly);
         const page = rows.slice(0, COMPACTION_PAGE_SIZE);
         const obsolete: number[] = [];
+        const replayFloors = new Map<string, number>();
         for (const row of page) {
+          const streamKey = `${row.aggregate_kind}\0${row.stream_id}`;
+          const isNewestInStream = !newestStreamKeys.has(streamKey);
+          newestStreamKeys.add(streamKey);
+          if (
+            row.expired === 1 &&
+            row.retention_anchor === 0 &&
+            row.application_event_version === 2 &&
+            row.aggregate_kind === "thread" &&
+            !isNewestInStream &&
+            row.event_type !== "thread.created" &&
+            row.event_type !== "thread.deleted"
+          ) {
+            obsolete.push(row.sequence);
+            if (!replayFloors.has(row.stream_id)) replayFloors.set(row.stream_id, row.sequence);
+            continue;
+          }
           if (row.imported_legacy_thread === 1) {
             obsolete.push(row.sequence);
           } else if (row.application_event_version === 2) {
@@ -341,7 +409,20 @@ export const layer: Layer.Layer<
         // Never hold a transaction or the reader lock across a yield or a rest.
         yield* Effect.yieldNow;
         if (obsolete.length > 0) {
-          yield* sql`DELETE FROM orchestration_events WHERE sequence IN ${sql.in(obsolete)}`;
+          // Replay readers must see a deletion and its floor from the same commit.
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql`DELETE FROM orchestration_events WHERE sequence IN ${sql.in(obsolete)}`;
+              for (const [threadId, floor] of replayFloors) {
+                yield* sql`
+                  INSERT INTO orchestration_v2_event_retention (thread_id, replay_floor)
+                  VALUES (${threadId}, ${floor})
+                  ON CONFLICT(thread_id) DO UPDATE SET
+                    replay_floor = MAX(replay_floor, excluded.replay_floor)
+                `;
+              }
+            }),
+          );
           deletedEventCount += obsolete.length;
           yield* Effect.yieldNow;
         }
